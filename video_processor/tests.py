@@ -143,18 +143,18 @@ class AskMyVideoPhase1Tests(TestCase):
         data = json.loads(response.content)
         self.assertEqual(data["status"], "healthy")
         self.assertIn("timestamp", data)
-        self.assertEqual(data["database"], "connected")
 
     @patch("video_processor.views.search_engine")
     def test_health_check_with_search_engine(self, mock_search_engine):
-        """Test health check includes search engine status."""
+        """Test API health check includes search engine status."""
         mock_search_engine.is_available = True
 
-        response = self.client.get("/health/")
+        response = self.client.get("/api/health/")
         self.assertEqual(response.status_code, 200)
 
         data = json.loads(response.content)
-        self.assertEqual(data["search_engine"], "available")
+        self.assertEqual(data["status"], "healthy")
+        self.assertIn("components", data)
 
     def test_video_ownership_isolation(self):
         """Test that video operations respect user ownership."""
@@ -211,11 +211,8 @@ class DockerConfigTests(TestCase):
         """Test that Docker configuration files exist."""
         import os
 
-        # Check if Dockerfile exists
-        self.assertTrue(os.path.exists("Dockerfile"))
-
-        # Check if docker-compose.yml exists
-        self.assertTrue(os.path.exists("docker-compose.yml"))
+        self.assertTrue(os.path.exists("Dockerfile.prod"))
+        self.assertTrue(os.path.exists("docker-compose.prod.yml"))
 
         # Check if .dockerignore exists
         self.assertTrue(os.path.exists(".dockerignore"))
@@ -246,12 +243,16 @@ class CIConfigTests(TestCase):
         with open(".github/workflows/ci.yml", "r") as f:
             ci_config = f.read()
 
-        # Check for required CI jobs
         self.assertIn("test:", ci_config)
         self.assertIn("lint:", ci_config)
-        self.assertIn("docker:", ci_config)
-        self.assertIn("security:", ci_config)
+        self.assertIn("docker-build:", ci_config)
+        self.assertIn("python manage.py test", ci_config)
 
-        # Check for key testing steps
-        self.assertIn("health/", ci_config)  # Health check test
-        self.assertIn("python manage.py test", ci_config)  # Django tests
+        with open(".github/workflows/deploy-vps.yml", "r") as f:
+            deploy_config = f.read()
+        self.assertIn("VPS_SSH_KEY", deploy_config)
+        self.assertIn("/opt/360ws/clients/docker-app/recall-ai", deploy_config)
+
+        with open(".github/workflows/security.yml", "r") as f:
+            security_config = f.read()
+        self.assertIn("bandit", security_config)

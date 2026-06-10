@@ -110,4 +110,24 @@ node_modules/
 # Temporary files
 *.tmp
 *.temp
-*.bak 
+*.bak
+
+# Large Docker image archives (should not be in image)
+*.tar.gz
+.video-processor*
+video-processor*.tar.gz
+
+# AWS / legacy deployment artifacts
+terraform/
+task-definition*.json
+appspec.yml*
+*.pdf
+deploy-aws*.sh
+deploy-ec2.sh
+deploy-production.sh
+deploy.sh
+aws-setup.sh
+setup-ec2-env.sh
+startup-ec2.sh
+health-check.sh
+deployment-status.sh 

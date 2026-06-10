@@ -30,6 +30,8 @@ services:
       CELERY_RESULT_BACKEND: redis://recall-ai-redis:6379/0
       GUNICORN_WORKERS: "1"
       GUNICORN_TIMEOUT: "300"
+      HF_HOME: /app/.cache/huggingface
+      XDG_CACHE_HOME: /app/.cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,8 +43,8 @@ services:
     volumes:
       - media:/app/media
       - search_cache:/app/search_cache
-      - hf_cache:/home/appuser/.cache/huggingface
-      - whisper_cache:/home/appuser/.cache/whisper
+      - hf_cache:/app/.cache/huggingface
+      - whisper_cache:/app/.cache/whisper
     labels:
       - "com.360ws.app=recall-ai"
       - "com.360ws.type=docker-app"
@@ -69,6 +71,8 @@ services:
       CELERY_BROKER_URL: redis://recall-ai-redis:6379/0
       CELERY_RESULT_BACKEND: redis://recall-ai-redis:6379/0
       C_FORCE_ROOT: "1"
+      HF_HOME: /app/.cache/huggingface
+      XDG_CACHE_HOME: /app/.cache
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,8 +83,8 @@ services:
     volumes:
       - media:/app/media
       - search_cache:/app/search_cache
-      - hf_cache:/home/appuser/.cache/huggingface
-      - whisper_cache:/home/appuser/.cache/whisper
+      - hf_cache:/app/.cache/huggingface
+      - whisper_cache:/app/.cache/whisper
     labels:
       - "com.360ws.app=recall-ai"
       - "com.360ws.type=docker-app"

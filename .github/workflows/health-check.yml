@@ -1,0 +1,47 @@
+name: VPS Health Check
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+jobs:
+  check-vps:
+    name: Check recall-ai on mitch-cloud
+    runs-on: ubuntu-latest
+    env:
+      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
+    steps:
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - run: ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Health check via SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -e
+          ssh ${VPS_USER}@${VPS_HOST} << 'EOF'
+            set -e
+            cd /opt/360ws/clients/docker-app/recall-ai
+
+            echo "Container status:"
+            docker compose -f docker-compose.prod.yml ps
+
+            echo "Health endpoint:"
+            curl -fsS http://localhost:8030/health/
+            echo ""
+            curl -fsS http://localhost:8030/api/health/
+            echo ""
+          EOF
+
+      - name: Notify Slack on failure
+        if: failure() && env.SLACK_WEBHOOK != ''
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+            --data '{"text":"🚨 recall-ai VPS health check failed"}' \
+            "$SLACK_WEBHOOK"

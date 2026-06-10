@@ -1,0 +1,81 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-scan:
+    name: Dependency Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit production dependencies
+        run: pip-audit -r core_requirements.txt --strict --desc on
+        continue-on-error: true
+
+  code-scan:
+    name: Static Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      - name: Install bandit
+        run: pip install bandit
+
+      - name: Run bandit
+        run: |
+          bandit -r video_processor/ video_recall_project/ \
+            core_video_processor.py whisper_compat.py \
+            -ll -f json -o bandit-report.json || true
+          bandit -r video_processor/ video_recall_project/ -ll
+        continue-on-error: true
+
+      - name: Upload bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+          retention-days: 14
+
+  secrets-scan:
+    name: Secrets Detection
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Block committed secrets
+        run: |
+          set -e
+          patterns='\.env\.prod$|\.pem$|\.key$|video-processor.*\.tar\.gz'
+          if git ls-files | grep -E "$patterns"; then
+            echo "ERROR: Sensitive or large artifact files are tracked in git."
+            exit 1
+          fi
+          echo "No blocked secret patterns found in tracked files."
