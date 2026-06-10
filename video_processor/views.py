@@ -22,15 +22,29 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import ListView
+from django.contrib.auth.models import User
+from django.contrib.auth import login, authenticate
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
+from django.db.models import Q
+from django.views.decorators.http import require_http_methods
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
+from drf_spectacular.types import OpenApiTypes
 
 from core_video_processor import CoreVideoProcessor
 
 from .models import JobStatus, VideoJob, VideoSearchQuery
+# from .tasks import process_youtube_playlist, process_single_video, is_youtube_playlist_url
+
+# Configure logging first (before any imports that use logger)
+logger = logging.getLogger(__name__)
 
 # Import semantic search engine (the initialized instance)
 try:
     from semantic_search import SemanticSearchEngine, search_engine
-except ImportError:
+    logger.info("Semantic search engine imported successfully")
+except ImportError as e:
+    logger.warning(f"Semantic search engine not available: {e}")
     search_engine = None
     SemanticSearchEngine = None
 
@@ -41,12 +55,14 @@ try:
         enhance_search_with_ai,
         get_ai_engine,
     )
-
     AI_AVAILABLE = True
-    logger = logging.getLogger(__name__)
-except ImportError:
+    logger.info("AI enhanced search components imported successfully")
+except ImportError as e:
+    logger.warning(f"AI enhanced search not available: {e}")
     AI_AVAILABLE = False
-    logger = None
+    create_ai_config = None
+    enhance_search_with_ai = None
+    get_ai_engine = None
 
 # Phase 2: Import enhanced AI components
 try:
@@ -68,11 +84,106 @@ except ImportError as e:
     rag_qa = None
     PHASE2_AI_AVAILABLE = False
 
-# Configure logging
-logger = logging.getLogger(__name__)
-
 # Initialize the video processor
 video_processor = CoreVideoProcessor()
+
+# Check if search engine is available
+search_available = search_engine is not None and hasattr(search_engine, 'is_initialized') and search_engine.is_initialized
+
+
+def create_error_response(error_code, message, details=None, status_code=400):
+    """Create standardized error responses"""
+    response = {
+        "success": False,
+        "error": {
+            "code": error_code,
+            "message": message,
+            "timestamp": timezone.now().isoformat()
+        }
+    }
+    if details:
+        response["error"]["details"] = details
+    return JsonResponse(response, status=status_code)
+
+
+def create_success_response(data, message="Operation completed successfully"):
+    """Create standardized success responses"""
+    return JsonResponse({
+        "success": True,
+        "data": data,
+        "message": message,
+        "timestamp": timezone.now().isoformat()
+    })
+
+
+def is_youtube_playlist_url(url):
+    """Simple function to detect YouTube playlist URLs."""
+    return "list=" in url and ("youtube.com" in url or "youtu.be" in url)
+
+
+def extract_playlist_videos(playlist_url):
+    """Extract video URLs from a YouTube playlist."""
+    try:
+        # Enhanced yt-dlp options for better network handling
+        ydl_opts = {
+            'extract_flat': True,
+            'quiet': True,
+            'no_warnings': True,
+            'socket_timeout': 30,
+            'retries': 5,
+            'fragment_retries': 5,
+            'http_headers': {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            },
+            'extractor_args': {
+                'youtube': {
+                    'skip': ['dash', 'hls']
+                }
+            }
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            logger.info(f"Extracting playlist: {playlist_url}")
+            playlist_info = ydl.extract_info(playlist_url, download=False)
+            
+            if not playlist_info:
+                logger.error("No playlist info returned")
+                return [], None
+                
+            if 'entries' not in playlist_info:
+                logger.error("No entries found in playlist")
+                return [], None
+                
+            video_urls = []
+            for entry in playlist_info['entries']:
+                if entry and entry.get('id'):
+                    # Use the video ID to construct the URL
+                    video_url = f"https://www.youtube.com/watch?v={entry['id']}"
+                    video_urls.append(video_url)
+                elif entry and entry.get('url'):
+                    # Fallback to URL if available
+                    video_urls.append(entry['url'])
+            
+            playlist_title = playlist_info.get('title', 'Unknown Playlist')
+            logger.info(f"Extracted {len(video_urls)} videos from playlist: {playlist_title}")
+            return video_urls, playlist_title
+            
+    except Exception as e:
+        logger.error(f"Error extracting playlist videos: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        
+        # If network error, provide helpful fallback message
+        if "Incomplete data received" in str(e) or "network" in str(e).lower():
+            logger.error("Network connectivity issue detected. This may be due to:")
+            logger.error("1. Container network restrictions")
+            logger.error("2. YouTube rate limiting")
+            logger.error("3. DNS resolution issues")
+            logger.error("Consider running the container with --dns 8.8.8.8 or checking network policies")
+        
+        return [], None
+    
+    return [], None
 
 
 # User Authentication Views
@@ -105,19 +216,40 @@ class VideoLibraryView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
         # Add user-specific statistics
         user_videos = self.get_queryset()
+        
+        # Calculate stats based on user's videos (not all videos)
+        completed_videos = user_videos.filter(status=JobStatus.COMPLETED)
+        total_videos = completed_videos.count()
+        total_processing_time = sum(
+            job.processing_time or 0
+            for job in completed_videos if job.processing_time
+        )
+        total_words = sum(
+            job.word_count or 0
+            for job in completed_videos if job.word_count
+        )
+        pending_jobs = user_videos.filter(status=JobStatus.PENDING).count()
+
         context.update(
             {
                 "video_count": user_videos.count(),
                 "completed_count": user_videos.filter(status="completed").count(),
                 "processing_count": user_videos.filter(status="processing").count(),
                 "failed_count": user_videos.filter(status="failed").count(),
+                # User-specific stats for dashboard
+                "stats": {
+                    "total_videos": total_videos,
+                    "total_processing_time": total_processing_time,
+                    "total_words": total_words,
+                    "pending_jobs": pending_jobs,
+                },
             }
         )
         return context
 
 
-@login_required
 def search_interface_view(request):
+    """Public search interface - no login required."""
     return render(request, "video_processor/search_interface.html")
 
 
@@ -288,21 +420,18 @@ def convert_semantic_results_to_api_format(semantic_results):
     api_results = []
 
     for result in semantic_results:
-        try:
-            video = VideoJob.objects.get(job_id=result.job_id)
-            api_results.append(
-                {
-                    "video_id": str(result.job_id),
-                    "video_name": video.video_name,
-                    "start_time": result.start_time,
-                    "end_time": result.end_time,
-                    "text": result.text,
-                    "relevance_score": result.score,
-                    "search_type": result.search_type,
-                }
-            )
-        except VideoJob.DoesNotExist:
-            continue
+        api_results.append(
+            {
+                "video_id": result.job_id,
+                "video_name": clean_video_name(result.video_name),
+                "start_time": result.start_time,
+                "end_time": result.end_time,
+                "text": result.text,
+                "relevance_score": result.score,
+                "search_type": "semantic",
+                "timestamp_formatted": f"{int(result.start_time // 60)}:{int(result.start_time % 60):02d}"
+            }
+        )
 
     return api_results
 
@@ -311,39 +440,44 @@ def convert_keyword_results_to_api_format(keyword_results):
     """Convert keyword search results to JSON-serializable format for API."""
     api_results = []
 
-    for result_group in keyword_results:
-        video = result_group["video"]
-        segments = result_group["segments"]
-
-        for segment in segments:
-            api_results.append(
-                {
-                    "video_id": str(video.job_id),
-                    "video_name": video.video_name,
-                    "start_time": segment["start_time"],
-                    "end_time": segment["end_time"],
-                    "text": segment["text"],
-                    "relevance_score": segment.get("relevance_score", 0.0),
-                    "search_type": "keyword",
-                }
-            )
+    for result in keyword_results:
+        api_results.append(
+            {
+                "video_id": result["job_id"],
+                "video_name": clean_video_name(result["video_name"]),
+                "start_time": result["start_time"],
+                "end_time": result["end_time"],
+                "text": result["text"],
+                "relevance_score": result["score"],
+                "search_type": "keyword",
+                "timestamp_formatted": f"{int(result['start_time'] // 60)}:{int(result['start_time'] % 60):02d}"
+            }
+        )
 
     return api_results
 
 
 @csrf_exempt
 def upload_video(request):
-    """Handle video upload and processing (files or YouTube URLs)."""
+    """Handle video upload and processing (files, YouTube URLs, or YouTube playlists)."""
     if request.method != "POST":
         return redirect("video_library")
 
     # Check if it's a YouTube URL submission
     youtube_url = request.POST.get("youtube_url", "").strip()
+    playlist_url = request.POST.get("playlist_url", "").strip()
 
     if youtube_url:
-        return handle_youtube_upload(request, youtube_url)
+        # Check if it's a playlist URL
+        if is_youtube_playlist_url(youtube_url):
+            return handle_youtube_playlist_simple(request, youtube_url)
+        else:
+            return handle_youtube_upload(request, youtube_url)
+    
+    if playlist_url:
+        return handle_youtube_playlist_simple(request, playlist_url)
 
-    # Handle file upload
+    # Handle file upload (existing code)
     if "video" not in request.FILES:
         messages.error(request, "No video file provided")
         return redirect("video_library")
@@ -373,16 +507,15 @@ def upload_video(request):
         # Create video job
         job = VideoJob.objects.create(
             job_id=unique_id,  # Use the same UUID for consistency
+            user=request.user,
             video_path=str(file_path),
             video_name=video_file.name,
             file_size_bytes=video_file.size,
             status=JobStatus.PENDING,
         )
 
-        # Process video in background thread
-        thread = threading.Thread(target=process_video_job, args=(job.job_id,))
-        thread.daemon = True
-        thread.start()
+        # Process video in background
+        threading.Thread(target=process_video_job, args=(str(job.job_id),)).start()
 
         messages.success(
             request, f'Video "{video_file.name}" uploaded and queued for processing'
@@ -396,73 +529,616 @@ def upload_video(request):
 
 
 def handle_youtube_upload(request, youtube_url):
-    """Handle YouTube URL submission."""
+    """Handle single YouTube URL submission."""
     try:
-        # Validate YouTube URL
-        if not is_youtube_url(youtube_url):
+        # Create video job for YouTube URL
+        job = VideoJob.objects.create(
+            user=request.user,
+            video_name="YouTube Video (downloading...)",
+            youtube_url=youtube_url,
+            status=JobStatus.PENDING,
+        )
+        
+        # Process video in background
+        threading.Thread(target=process_video_job, args=(str(job.job_id),)).start()
+        
+        messages.success(
+            request,
+            f'YouTube video queued for download and processing.',
+        )
+        messages.info(
+            request,
+            "Video will appear in your library as it is processed. This may take several minutes.",
+        )
+        
+    except Exception as e:
+        logger.error(f"Error processing YouTube video: {e}")
+        messages.error(request, f"Error processing YouTube video: {e}")
+
+
+def handle_youtube_playlist_simple(request, playlist_url):
+    """Handle YouTube playlist URL submission with simple approach."""
+    try:
+        # Validate playlist URL
+        if not is_youtube_playlist_url(playlist_url):
             messages.error(
-                request, "Invalid YouTube URL. Please provide a valid YouTube link."
+                request, "Invalid YouTube playlist URL. Please provide a valid playlist link."
             )
             return redirect("video_library")
 
-        # Set up download directory
-        media_videos_dir = settings.MEDIA_ROOT / "videos"
-
-        messages.info(
-            request, "Downloading YouTube video... This may take a few minutes."
-        )
-
-        # Download video
-        success, video_path, video_info, error_msg = download_youtube_video(
-            youtube_url, media_videos_dir
-        )
-
-        if not success:
-            messages.error(request, f"Failed to download YouTube video: {error_msg}")
+        # Extract video URLs from playlist
+        video_urls, playlist_title = extract_playlist_videos(playlist_url)
+        
+        if not video_urls:
+            messages.error(request, "Could not extract videos from playlist. Please check the URL.")
             return redirect("video_library")
 
-        # Get file size
-        file_size = Path(video_path).stat().st_size
+        # Create individual video jobs for each video in the playlist
+        jobs_created = 0
+        for video_url in video_urls[:10]:  # Limit to first 10 videos to avoid overwhelming
+            try:
+                job = VideoJob.objects.create(
+                    user=request.user,
+                    video_name=f"Playlist Video (downloading...)",
+                    youtube_url=video_url,
+                    status=JobStatus.PENDING,
+                )
+                
+                # Process video in background
+                threading.Thread(target=process_video_job, args=(str(job.job_id),)).start()
+                jobs_created += 1
+                
+            except Exception as e:
+                logger.error(f"Error creating job for video {video_url}: {e}")
+                continue
 
-        # Create video job
-        import uuid
-
-        job = VideoJob.objects.create(
-            video_path=video_path,
-            video_name=video_info["title"],
-            youtube_url=youtube_url,  # Store the original YouTube URL
-            file_size_bytes=file_size,
-            status=JobStatus.PENDING,
-        )
-
-        # Process video in background thread
-        thread = threading.Thread(target=process_video_job, args=(job.job_id,))
-        thread.daemon = True
-        thread.start()
-
-        messages.success(
-            request,
-            f'YouTube video "{video_info["title"]}" downloaded and queued for processing',
-        )
+        if jobs_created > 0:
+            messages.success(
+                request,
+                f'YouTube playlist "{playlist_title or "Unknown"}" processed. {jobs_created} videos queued for download and processing.',
+            )
+            messages.info(
+                request,
+                "Videos will appear in your library as they are processed. This may take several minutes.",
+            )
+        else:
+            messages.error(request, "No videos could be processed from the playlist.")
 
     except Exception as e:
-        logger.error(f"Error processing YouTube URL: {e}")
-        messages.error(request, f"Error processing YouTube video: {e}")
+        logger.error(f"Error processing YouTube playlist: {e}")
+        messages.error(request, f"Error processing YouTube playlist: {e}")
 
+
+# Enhanced Search Interfaces
+@login_required
+def enhanced_search_interface(request):
+    """Enhanced search interface for authenticated users."""
+    return render(request, "video_processor/enhanced_search.html", {
+        "semantic_available": search_available,
+        "enhanced_available": enhanced_search is not None,
+    })
+
+
+def public_enhanced_search_interface(request):
+    """Public enhanced search interface - no authentication required."""
+    return render(request, "video_processor/public_enhanced_search.html", {
+        "semantic_available": search_available,
+        "enhanced_available": enhanced_search is not None,
+    })
+
+
+def public_user_search_interface(request, username):
+    """Public search interface for a specific user's videos."""
+    try:
+        target_user = User.objects.get(username=username)
+    except User.DoesNotExist:
+        return render(request, "video_processor/user_not_found.html", {
+            "username": username
+        })
+    
+    return render(request, "video_processor/public_user_search.html", {
+        "target_user": target_user,
+        "username": username,
+        "semantic_available": search_available,
+    })
+
+
+def public_user_enhanced_search_interface(request, username):
+    """Public enhanced search interface for a specific user's videos."""
+    try:
+        target_user = User.objects.get(username=username)
+    except User.DoesNotExist:
+        return render(request, "video_processor/user_not_found.html", {
+            "username": username
+        })
+    
+    return render(request, "video_processor/public_user_enhanced_search.html", {
+        "target_user": target_user,
+        "username": username,
+        "semantic_available": search_available,
+        "enhanced_available": enhanced_search is not None,
+    })
+
+
+@login_required
+def transcript_editor(request, job_id):
+    """Transcript editor for a specific video."""
+    try:
+        video = VideoJob.objects.get(job_id=job_id, user=request.user)
+    except VideoJob.DoesNotExist:
+        messages.error(request, "Video not found or access denied.")
+        return redirect("video_library")
+    
+    if video.status != JobStatus.COMPLETED:
+        messages.error(request, "Video processing not completed yet.")
+        return redirect("video_library")
+    
+    return render(request, "video_processor/transcript_editor.html", {
+        "video": video,
+    })
+
+
+@login_required
+def delete_video(request, job_id):
+    """Delete a video and its associated files."""
+    if request.method != "POST":
+        messages.error(request, "Invalid request method.")
+        return redirect("video_library")
+    
+    try:
+        video = VideoJob.objects.get(job_id=job_id, user=request.user)
+    except VideoJob.DoesNotExist:
+        messages.error(request, "Video not found or access denied.")
+        return redirect("video_library")
+    
+    try:
+        # Store video name for success message
+        video_name = video.video_name
+        
+        # Delete video file if it exists
+        if video.video_path and os.path.exists(video.video_path):
+            os.remove(video.video_path)
+        
+        # Delete the video job from database
+        video.delete()
+        
+        messages.success(request, f'Video "{video_name}" has been successfully deleted.')
+        
+    except Exception as e:
+        logger.error(f"Error deleting video {job_id}: {e}")
+        messages.error(request, f"Error deleting video: {e}")
+    
     return redirect("video_library")
 
 
+# API Endpoints for Admin Functionality
+
+@extend_schema(
+    tags=['Admin'],
+    summary='Get search engine status',
+    description='Returns the current status of the search engine including initialization state and indexed segments count.',
+    responses={200: {'description': 'Search engine status'}}
+)
+@csrf_exempt
+def api_search_status(request):
+    """API endpoint to get search engine status."""
+    try:
+        # Check if search engine is available and initialized
+        status = {
+            "available": search_available,
+            "initialized": False,
+            "model_name": "all-MiniLM-L6-v2",
+            "indexed_segments": 0
+        }
+        
+        if search_available and search_engine:
+            try:
+                # Try to get index stats
+                if hasattr(search_engine, 'index') and search_engine.index is not None:
+                    status["initialized"] = True
+                    status["indexed_segments"] = search_engine.index.ntotal if hasattr(search_engine.index, 'ntotal') else 0
+                elif hasattr(search_engine, 'get_stats'):
+                    stats = search_engine.get_stats()
+                    status["initialized"] = stats.get("initialized", False)
+                    status["indexed_segments"] = stats.get("segments", 0)
+            except Exception as e:
+                logger.error(f"Error getting search engine stats: {e}")
+        
+        return JsonResponse(status)
+    except Exception as e:
+        logger.error(f"Error in api_search_status: {e}")
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_rebuild_search_index(request):
+    """API endpoint to rebuild the search index."""
+    try:
+        if not search_available:
+            return JsonResponse({"success": False, "error": "Search engine not available"})
+        
+        # Get all completed videos
+        completed_videos = VideoJob.objects.filter(status=JobStatus.COMPLETED)
+        
+        if not completed_videos.exists():
+            return JsonResponse({"success": False, "error": "No completed videos to index"})
+        
+        # Rebuild index
+        segments_indexed = 0
+        
+        try:
+            # If we have the semantic search engine, rebuild its index
+            if search_engine and hasattr(search_engine, 'rebuild_index'):
+                segments_indexed = search_engine.rebuild_index()
+            else:
+                # Basic rebuild approach
+                segments = get_video_segments_for_search()
+                segments_indexed = len(segments)
+                
+                if search_engine and hasattr(search_engine, 'add_segments'):
+                    search_engine.add_segments(segments)
+        
+        except Exception as e:
+            logger.error(f"Error rebuilding search index: {e}")
+            return JsonResponse({"success": False, "error": f"Failed to rebuild index: {str(e)}"})
+        
+        return JsonResponse({
+            "success": True, 
+            "message": f"Search index rebuilt successfully with {segments_indexed} segments"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in api_rebuild_search_index: {e}")
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_rebuild_enhanced_search_index(request):
+    """API endpoint to rebuild the enhanced search index."""
+    try:
+        if not enhanced_search or not PHASE2_AI_AVAILABLE:
+            return JsonResponse({"success": False, "error": "Enhanced search engine not available"})
+        
+        # Get video segments from the regular search engine
+        from semantic_search import search_engine
+        
+        if not search_engine.is_initialized:
+            return JsonResponse({"success": False, "error": "Regular search engine not initialized"})
+        
+        # Use the same segments data that the regular search engine uses
+        video_segments_data = []
+        
+        for segment in search_engine.segments_metadata:
+            video_segments_data.append({
+                'text': segment.get('text', ''),
+                'video_id': segment.get('job_id', ''),
+                'video_title': segment.get('video_name', ''),
+                'start_time': segment.get('start_time', 0),
+                'end_time': segment.get('end_time', 0)
+            })
+        
+        if not video_segments_data:
+            return JsonResponse({"success": False, "error": "No video segments found for indexing"})
+        
+        # Build enhanced search index
+        try:
+            enhanced_search.build_enhanced_index(video_segments_data)
+            total_segments = len(video_segments_data)
+            
+            return JsonResponse({
+                "success": True, 
+                "message": f"Enhanced search index built successfully with {total_segments} segments from {len(set(seg['video_id'] for seg in video_segments_data))} videos"
+            })
+            
+        except Exception as e:
+            logger.error(f"Error building enhanced search index: {e}")
+            return JsonResponse({"success": False, "error": f"Failed to build enhanced index: {str(e)}"})
+        
+    except Exception as e:
+        logger.error(f"Error in api_rebuild_enhanced_search_index: {e}")
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_cleanup_youtube(request):
+    """API endpoint to cleanup YouTube video files."""
+    try:
+        dry_run = request.POST.get('dry_run', 'false').lower() == 'true'
+        
+        # Find YouTube videos that have been processed
+        youtube_videos = VideoJob.objects.filter(
+            status=JobStatus.COMPLETED,
+            video_path__isnull=False
+        ).exclude(video_path="")
+        
+        files_processed = 0
+        space_freed_mb = 0
+        files_info = []
+        
+        for video in youtube_videos:
+            if video.video_path and os.path.exists(video.video_path):
+                # Check if it's a YouTube video (has youtube_url or video_path contains youtube indicators)
+                if (hasattr(video, 'youtube_url') and video.youtube_url) or 'youtube' in video.video_path.lower():
+                    file_size = os.path.getsize(video.video_path)
+                    file_size_mb = round(file_size / (1024 * 1024), 2)
+                    
+                    files_info.append({
+                        "name": os.path.basename(video.video_path),
+                        "size_mb": file_size_mb
+                    })
+                    
+                    if not dry_run:
+                        # Actually delete the file and mark as cleaned up
+                        os.remove(video.video_path)
+                        video.video_path = f"{video.video_path} [CLEANED_UP]"
+                        video.save()
+                    
+                    files_processed += 1
+                    space_freed_mb += file_size_mb
+        
+        return JsonResponse({
+            "success": True,
+            "files_processed": files_processed,
+            "space_freed_mb": round(space_freed_mb, 2),
+            "files": files_info[:10]  # Limit to first 10 files for display
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in api_cleanup_youtube: {e}")
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+
+@extend_schema(
+    tags=['Admin'],
+    summary='Get pending jobs',
+    description='Retrieve a list of pending video processing jobs.',
+    responses={200: {'description': 'List of pending jobs'}}
+)
+@csrf_exempt
+def api_pending_jobs(request):
+    """API endpoint to get pending jobs."""
+    try:
+        pending_jobs = VideoJob.objects.filter(status=JobStatus.PENDING).order_by('-created_at')
+        
+        jobs_data = []
+        for job in pending_jobs[:20]:  # Limit to 20 most recent
+            file_size_mb = 0
+            if job.file_size_bytes:
+                file_size_mb = round(job.file_size_bytes / (1024 * 1024), 2)
+            
+            jobs_data.append({
+                "job_id": str(job.job_id),
+                "video_name": job.video_name,
+                "file_size_mb": file_size_mb,
+                "created_at": job.created_at.isoformat()
+            })
+        
+        return JsonResponse({
+            "count": len(jobs_data),
+            "pending_jobs": jobs_data
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in api_pending_jobs: {e}")
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def api_process_job(request):
+    """API endpoint to manually process a job."""
+    try:
+        job_id = request.POST.get('job_id')
+        if not job_id:
+            return JsonResponse({"success": False, "error": "Job ID required"})
+        
+        try:
+            job = VideoJob.objects.get(job_id=job_id, user=request.user)
+        except VideoJob.DoesNotExist:
+            return JsonResponse({"success": False, "error": "Job not found or access denied"})
+        
+        if job.status != JobStatus.PENDING:
+            return JsonResponse({"success": False, "error": f"Job is not pending (current status: {job.status})"})
+        
+        # Start processing in background
+        threading.Thread(target=process_video_job, args=(job_id,)).start()
+        
+        return JsonResponse({
+            "success": True,
+            "message": f"Processing started for '{job.video_name}'",
+            "job_id": job_id
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in api_process_job: {e}")
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+
+@extend_schema(
+    tags=['Videos'],
+    summary='Get video details',
+    description='Retrieve detailed information about a specific video by job ID.',
+    parameters=[
+        OpenApiParameter('job_id', OpenApiTypes.UUID, location=OpenApiParameter.PATH, description='Video job ID')
+    ],
+    responses={
+        200: {'description': 'Video details'},
+        404: {'description': 'Video not found'}
+    }
+)
+@csrf_exempt
+def api_video_details(request, job_id):
+    """API endpoint to get video details."""
+    try:
+        # Try to get video without user restriction for public access
+        video = VideoJob.objects.get(job_id=job_id)
+        
+        video_data = {
+            "job_id": str(video.job_id),
+            "video_name": video.video_name,
+            "status": video.status,
+            "is_youtube": hasattr(video, 'youtube_url') and bool(video.youtube_url),
+            "youtube_video_id": None,
+            "duration_seconds": video.duration_seconds,
+            "video_path": video.video_path,
+            "youtube_url": getattr(video, 'youtube_url', None)
+        }
+        
+        # Extract YouTube video ID from URL if available
+        if video_data["is_youtube"] and hasattr(video, 'youtube_url'):
+            import re
+            # Enhanced YouTube regex patterns
+            youtube_patterns = [
+                r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})',
+                r'youtube\.com/watch\?.*v=([a-zA-Z0-9_-]{11})',
+                r'youtu\.be/([a-zA-Z0-9_-]{11})',
+                r'youtube\.com/embed/([a-zA-Z0-9_-]{11})'
+            ]
+            
+            for pattern in youtube_patterns:
+                match = re.search(pattern, video.youtube_url)
+                if match:
+                    video_data["youtube_video_id"] = match.group(1)
+                    break
+        
+        # If no YouTube URL but filename contains YouTube video ID, extract it
+        if not video_data["youtube_video_id"] and video.video_path:
+            import re
+            # Extract YouTube video ID from filename (common pattern: ID_title.mp4)
+            # Look for 11-character YouTube video ID at the beginning of the filename
+            filename_pattern = r'^([a-zA-Z0-9_-]{11})_'
+            match = re.search(filename_pattern, os.path.basename(video.video_path))
+            if match:
+                video_data["youtube_video_id"] = match.group(1)
+                video_data["is_youtube"] = True
+                # Construct the YouTube URL from the video ID
+                video_data["youtube_url"] = f"https://www.youtube.com/watch?v={video_data['youtube_video_id']}"
+        
+        # If we found a video ID, construct proper YouTube URLs
+        if video_data["youtube_video_id"]:
+            video_data["youtube_watch_url"] = f"https://www.youtube.com/watch?v={video_data['youtube_video_id']}"
+            video_data["youtube_embed_url"] = f"https://www.youtube.com/embed/{video_data['youtube_video_id']}"
+        
+        return JsonResponse(video_data)
+        
+    except VideoJob.DoesNotExist:
+        return JsonResponse({"error": "Video not found"}, status=404)
+    except Exception as e:
+        logger.error(f"Error in api_video_details: {e}")
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@extend_schema(
+    tags=['Admin'],
+    summary='Get detailed statistics',
+    description='Retrieve comprehensive dashboard statistics including video counts, processing times, content stats, and search engine status.',
+    responses={200: {'description': 'Detailed statistics'}}
+)
+@csrf_exempt
+def api_detailed_stats(request):
+    """API endpoint to get comprehensive dashboard statistics."""
+    try:
+        # Video statistics
+        all_videos = VideoJob.objects.all()
+        completed_videos = all_videos.filter(status=JobStatus.COMPLETED)
+        total_videos = completed_videos.count()
+        pending_jobs = all_videos.filter(status=JobStatus.PENDING).count()
+        processing_jobs = all_videos.filter(status=JobStatus.PROCESSING).count()
+        failed_jobs = all_videos.filter(status=JobStatus.FAILED).count()
+        
+        # Recent jobs (last 7 days)
+        from datetime import datetime, timedelta
+        seven_days_ago = datetime.now() - timedelta(days=7)
+        recent_jobs_7_days = all_videos.filter(created_at__gte=seven_days_ago).count()
+        
+        # Processing statistics
+        processing_times = [job.processing_time for job in completed_videos if job.processing_time]
+        total_processing_time = sum(processing_times) if processing_times else 0
+        average_processing_time = sum(processing_times) / len(processing_times) if processing_times else 0
+        
+        # Content duration in hours
+        content_durations = [job.duration_seconds for job in completed_videos if job.duration_seconds]
+        total_duration_seconds = sum(content_durations) if content_durations else 0
+        total_duration_hours = round(total_duration_seconds / 3600, 1) if total_duration_seconds else 0
+        
+        # Content statistics
+        word_counts = [job.word_count for job in completed_videos if job.word_count]
+        total_words = sum(word_counts) if word_counts else 0
+        
+        # Language distribution (mock data - can be enhanced later)
+        language_distribution = {"en": total_videos} if total_videos > 0 else {}
+        
+        # Storage statistics
+        file_sizes = [job.file_size_bytes for job in all_videos if job.file_size_bytes]
+        total_file_size_bytes = sum(file_sizes) if file_sizes else 0
+        total_file_size_gb = round(total_file_size_bytes / (1024**3), 2)
+        
+        # Search engine stats
+        search_stats = {}
+        try:
+            if search_engine and hasattr(search_engine, 'is_initialized'):
+                search_stats = {
+                    "indexed_segments": search_engine.index.ntotal if hasattr(search_engine, 'index') and search_engine.index else 0,
+                    "is_initialized": search_engine.is_initialized,
+                    "model_name": "all-MiniLM-L6-v2"
+                }
+            else:
+                search_stats = {
+                    "indexed_segments": 0,
+                    "is_initialized": False,
+                    "error": "Search engine not available"
+                }
+        except Exception as e:
+            search_stats = {
+                "indexed_segments": 0,
+                "is_initialized": False,
+                "error": str(e)
+            }
+        
+        return JsonResponse({
+            "video_stats": {
+                "total_videos": total_videos,
+                "pending_jobs": pending_jobs,
+                "processing_jobs": processing_jobs,
+                "failed_jobs": failed_jobs,
+                "recent_jobs_7_days": recent_jobs_7_days
+            },
+            "processing_stats": {
+                "total_processing_time": round(total_processing_time, 1),
+                "average_processing_time": round(average_processing_time, 1),
+                "total_duration_hours": total_duration_hours
+            },
+            "content_stats": {
+                "total_words": total_words,
+                "language_distribution": language_distribution
+            },
+            "storage_stats": {
+                "total_file_size_gb": total_file_size_gb
+            },
+            "search_stats": search_stats
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting detailed stats: {e}")
+        return JsonResponse({"error": str(e)}, status=500)
+
+
 def process_video_job(job_id):
-    """Process a video job in the background."""
+    """Process a video job - wrapper function for background processing."""
     try:
         job = VideoJob.objects.get(job_id=job_id)
+        logger.info(f"🚀 Processing video: {job.video_name}")
+
         job.status = JobStatus.PROCESSING
         job.started_at = timezone.now()
         job.save()
 
         start_time = time.time()
 
-        # Process video using our core processor
+        # Process video using core processor
         result = video_processor.create_comprehensive_video_summary(job.video_path)
 
         processing_time = time.time() - start_time
@@ -477,1026 +1153,411 @@ def process_video_job(job_id):
         if result.get("processing_errors"):
             job.status = JobStatus.FAILED
             job.error_message = "; ".join(result["processing_errors"])
+            logger.error(f"❌ Processing failed: {job.error_message}")
         else:
-            # Only mark as completed if we have everything needed for searching
-            transcription_data = result.get("transcription", {})
-            has_text = bool(transcription_data.get("text", "").strip())
-            has_segments = bool(transcription_data.get("text_segments", []))
-
-            if has_text and has_segments:
-                job.status = JobStatus.COMPLETED
-                logger.info(
-                    f"Job {job_id} marked as COMPLETED - ready for searching with {len(transcription_data.get('text_segments', []))} segments"
-                )
-            else:
-                job.status = JobStatus.FAILED
-                job.error_message = (
-                    "Transcription incomplete - missing text or segments"
-                )
-                logger.warning(
-                    f"Job {job_id} failed completion check - has_text: {has_text}, has_segments: {has_segments}"
-                )
+            job.status = JobStatus.COMPLETED
+            logger.info(f"✅ Processing completed in {processing_time:.2f}s")
+            logger.info(f"   📝 Transcribed {job.word_count} words")
+            logger.info(f"   🗣️ Language: {job.language}")
 
         job.save()
 
-        logger.info(f"Job {job_id} completed in {processing_time:.2f}s")
-
-        # Clean up YouTube videos after successful processing to save storage
-        # Check if this is a YouTube video (either by naming pattern or video path containing YouTube IDs)
-        is_youtube = (
-            job.video_name.startswith(("YouTube_", "yt_"))
-            or "media/videos/" in job.video_path
-            and any(char in job.video_path for char in ["_", "-"])
-            and len(Path(job.video_path).stem.split("_")[0]) == 11  # YouTube ID length
-        )
-
-        if job.status == JobStatus.COMPLETED and is_youtube:
-            try:
-                video_path = Path(job.video_path)
-                if video_path.exists():
-                    file_size_mb = video_path.stat().st_size / (1024 * 1024)
-                    video_path.unlink()
-                    logger.info(
-                        f"Cleaned up YouTube video file: {job.video_name} ({file_size_mb:.1f}MB freed)"
-                    )
-                    # Update path to indicate file was cleaned up
-                    job.video_path = f"[CLEANED_UP] {job.video_path}"
-                    job.save()
-            except Exception as cleanup_error:
-                logger.warning(f"Could not clean up YouTube video: {cleanup_error}")
-
-        # Update semantic search index if video was successfully processed
-        if job.status == JobStatus.COMPLETED:
-            try:
-                rebuild_search_index()
-            except Exception as e:
-                logger.warning(f"Failed to update search index: {e}")
-
     except Exception as e:
-        logger.error(f"Error processing job {job_id}: {e}")
+        logger.error(f"❌ Error processing job {job_id}: {e}")
         try:
             job = VideoJob.objects.get(job_id=job_id)
             job.status = JobStatus.FAILED
             job.error_message = str(e)
             job.completed_at = timezone.now()
             job.save()
-        except:
+        except Exception:
+            # Ignore any errors when trying to update job status
             pass
 
 
-def rebuild_search_index():
-    """Rebuild the semantic search index with all completed videos."""
-    try:
-        # Get all completed videos with transcription data
-        videos = VideoJob.objects.filter(
-            status=JobStatus.COMPLETED, transcription__isnull=False
-        )
-
-        if not videos.exists():
-            logger.info("No videos available for search indexing")
-            return
-
-        # Prepare video segments data for indexing
-        video_segments = []
-        for video in videos:
-            segments = video.text_segments
-            if segments:
-                video_segments.append(
-                    {
-                        "job_id": str(video.job_id),
-                        "video_name": video.video_name,
-                        "segments": segments,
-                    }
-                )
-
-        if video_segments:
-            # Build the search index
-            search_engine.build_index(video_segments)
-            logger.info(f"Search index rebuilt with {len(video_segments)} videos")
-        else:
-            logger.warning("No video segments found for indexing")
-
-    except Exception as e:
-        logger.error(f"Error rebuilding search index: {e}")
-
-
-def download_youtube_video(url, output_path):
-    """
-    Download a YouTube video using yt-dlp.
-
-    Args:
-        url: YouTube URL
-        output_path: Directory to save the video
-
-    Returns:
-        tuple: (success, video_path, video_info, error_message)
-    """
-    try:
-        # Create output directory if it doesn't exist
-        output_path = Path(output_path)
-        output_path.mkdir(parents=True, exist_ok=True)
-
-        # Configure yt-dlp options
-        ydl_opts = {
-            "format": "best[ext=mp4]/best",  # Prefer mp4 format
-            "outtmpl": str(output_path / "%(id)s_%(title)s.%(ext)s"),
-            "restrictfilenames": True,  # Remove special characters from filename
-            "noplaylist": True,  # Only download single video, not playlist
-            "extractaudio": False,
-            "audioformat": "mp3",
-            "quiet": True,  # Reduce output verbosity
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Extract video info first
-            info = ydl.extract_info(url, download=False)
-
-            if not info:
-                return False, None, None, "Could not extract video information"
-
-            # Check video duration (optional limit)
-            duration = info.get("duration", 0)
-            if duration > 3600:  # 1 hour limit
-                return (
-                    False,
-                    None,
-                    None,
-                    f"Video too long: {duration//60:.1f} minutes (max 60 minutes)",
-                )
-
-            # Download the video
-            ydl.download([url])
-
-            # Find the downloaded file
-            video_id = info.get("id", "unknown")
-            title = info.get("title", "Unknown")
-
-            # Look for the downloaded file
-            downloaded_files = list(output_path.glob(f"{video_id}_*"))
-            if not downloaded_files:
-                return False, None, None, "Downloaded file not found"
-
-            video_path = downloaded_files[0]
-
-            # Return success with file info
-            return (
-                True,
-                str(video_path),
-                {
-                    "title": title,
-                    "duration": duration,
-                    "uploader": info.get("uploader", "Unknown"),
-                    "view_count": info.get("view_count", 0),
-                    "upload_date": info.get("upload_date", ""),
-                    "description": info.get("description", "")[
-                        :500
-                    ],  # Truncate description
-                    "url": url,
-                    "video_id": video_id,
-                },
-                None,
-            )
-
-    except Exception as e:
-        logger.error(f"Error downloading YouTube video: {e}")
-        return False, None, None, str(e)
-
-
-def is_youtube_url(url):
-    """Check if a URL is a valid YouTube URL."""
-    youtube_patterns = [
-        r"(?:https?://)?(?:www\.)?youtube\.com/watch\?v=[\w-]+",
-        r"(?:https?://)?(?:www\.)?youtu\.be/[\w-]+",
-        r"(?:https?://)?(?:www\.)?youtube\.com/embed/[\w-]+",
-        r"(?:https?://)?(?:www\.)?youtube\.com/v/[\w-]+",
-    ]
-
-    for pattern in youtube_patterns:
-        if re.match(pattern, url):
-            return True
-    return False
-
-
-def api_jobs(request):
-    """API endpoint for job data."""
-    jobs = VideoJob.objects.all().order_by("-created_at")
-    job_data = []
-
-    for job in jobs:
-        job_info = {
-            "job_id": str(job.job_id),
-            "video_path": job.video_path,
-            "video_name": job.video_name,
-            "status": job.status,
-            "created_at": job.created_at.isoformat(),
-            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-            "processing_time": job.processing_time,
-            "has_transcript": bool(job.transcription_text),
-            "word_count": job.word_count,
-            "language": job.language,
-        }
-        job_data.append(job_info)
-
-    return JsonResponse(job_data, safe=False)
-
-
-def api_latest_job(request):
-    """API endpoint for the latest job status."""
-    try:
-        latest_job = VideoJob.objects.order_by("-created_at").first()
-
-        if not latest_job:
-            return JsonResponse({"error": "No jobs found"}, status=404)
-
-        job_info = {
-            "job_id": str(latest_job.job_id),
-            "video_path": latest_job.video_path,
-            "video_name": latest_job.video_name,
-            "status": latest_job.status,
-            "created_at": latest_job.created_at.isoformat(),
-            "completed_at": (
-                latest_job.completed_at.isoformat() if latest_job.completed_at else None
-            ),
-            "processing_time": latest_job.processing_time,
-            "has_transcript": bool(latest_job.transcription_text),
-            "has_segments": bool(latest_job.text_segments),
-            "segment_count": (
-                len(latest_job.text_segments) if latest_job.text_segments else 0
-            ),
-            "word_count": latest_job.word_count,
-            "language": latest_job.language,
-            "error_message": latest_job.error_message,
-            "is_searchable": latest_job.status == JobStatus.COMPLETED
-            and bool(latest_job.transcription_text)
-            and bool(latest_job.text_segments),
-        }
-
-        return JsonResponse(job_info)
-
-    except Exception as e:
-        logger.error(f"Error in API latest job: {e}")
-        return JsonResponse({"error": str(e)}, status=500)
-
-
-def api_video_details(request, job_id):
-    """API endpoint for detailed video information."""
-    try:
-        job = get_object_or_404(VideoJob, job_id=job_id)
-
-        if job.status != JobStatus.COMPLETED or not job.transcription:
-            return JsonResponse({"error": "Video not processed yet"}, status=404)
-
-        # Prepare segments data
-        segments = []
-        for i, segment in enumerate(job.text_segments):
-            segments.append(
-                {
-                    "index": i,
-                    "start_time": segment.get("start", 0),
-                    "end_time": segment.get("end", 0),
-                    "duration": segment.get("end", 0) - segment.get("start", 0),
-                    "text": segment.get("text", "").strip(),
-                    "confidence": segment.get("confidence", 0),
-                }
-            )
-
-        video_details = {
-            "job_id": str(job.job_id),
-            "video_name": job.video_name,
-            "video_path": job.video_path,
-            "youtube_url": job.youtube_url,
-            "youtube_video_id": job.get_youtube_video_id(),
-            "is_youtube": job.is_youtube_video(),
-            "status": job.status,
-            "created_at": job.created_at.isoformat(),
-            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-            "processing_time": job.processing_time,
-            "metadata": {
-                "duration_seconds": job.duration_seconds,
-                "width_pixels": (
-                    job.metadata.get("width_pixels", 0) if job.metadata else 0
-                ),
-                "height_pixels": (
-                    job.metadata.get("height_pixels", 0) if job.metadata else 0
-                ),
-                "frames_per_second": (
-                    job.metadata.get("frames_per_second", 0) if job.metadata else 0
-                ),
-                "file_size_bytes": (
-                    job.metadata.get("file_size_bytes", 0) if job.metadata else 0
-                ),
-            },
-            "transcription": {
-                "text": job.transcription_text,
-                "language": job.language,
-                "word_count": job.word_count,
-                "confidence_score": (
-                    job.transcription.get("confidence_score", 0)
-                    if job.transcription
-                    else 0
-                ),
-                "processing_duration_seconds": (
-                    job.transcription.get("processing_duration_seconds", 0)
-                    if job.transcription
-                    else 0
-                ),
-            },
-            "segments": segments,
-            "segment_count": len(segments),
-        }
-
-        return JsonResponse(video_details)
-
-    except Exception as e:
-        logger.error(f"Error in API video details: {e}")
-        return JsonResponse({"error": str(e)}, status=500)
-
-
-def video_player_page(request, job_id):
-    """Direct link to video player page with optional timestamp."""
-    # timestamp = request.GET.get("t", 0)  # Future use
-    # job = get_object_or_404(VideoJob, job_id=job_id)  # Future use
-
-    # For now, redirect to main page
-    # In a full implementation, this would show a dedicated video player
-    return redirect("video_library")
-
-
-def delete_video(request, job_id):
-    """Delete a video job."""
-    if request.method == "POST":
-        job = get_object_or_404(VideoJob, job_id=job_id)
-        video_name = job.video_name
-
-        # Clean up video file if it exists
-        try:
-            video_path = Path(job.video_path)
-            if video_path.exists():
-                video_path.unlink()
-        except Exception as e:
-            logger.warning(f"Could not delete video file: {e}")
-
-        job.delete()
-        messages.success(request, f'Video "{video_name}" has been deleted')
-
-    return redirect("video_library")
-
-
-def serve_video(request, job_id):
-    """Serve video files with proper streaming support."""
-    job = get_object_or_404(VideoJob, job_id=job_id)
-
-    # Get the video file path
-    video_path = Path(job.video_path)
-
-    # If the original path doesn't exist, check in media directory
-    if not video_path.exists():
-        media_path = settings.MEDIA_ROOT / "videos" / f"{job_id}_{job.video_name}"
-        if media_path.exists():
-            video_path = media_path
-        else:
-            raise Http404("Video file not found")
-
-    if not video_path.exists():
-        raise Http404("Video file not found")
-
-    # Get content type
-    content_type, _ = mimetypes.guess_type(str(video_path))
-    if content_type is None:
-        content_type = "video/mp4"
-
-    # Handle range requests for video streaming
-    range_header = request.META.get("HTTP_RANGE")
-    file_size = video_path.stat().st_size
-
-    if range_header:
-        # Parse range header
-        range_match = range_header.replace("bytes=", "").split("-")
-        start = int(range_match[0]) if range_match[0] else 0
-        end = int(range_match[1]) if range_match[1] else file_size - 1
-
-        # Ensure valid range
-        if start >= file_size:
-            start = file_size - 1
-        if end >= file_size:
-            end = file_size - 1
-
-        chunk_size = end - start + 1
-
-        # Create response with partial content
-        response = HttpResponse(status=206)  # Partial Content
-        response["Content-Type"] = content_type
-        response["Content-Length"] = str(chunk_size)
-        response["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-        response["Accept-Ranges"] = "bytes"
-
-        # Read and return the requested chunk
-        with open(video_path, "rb") as video_file:
-            video_file.seek(start)
-            response.write(video_file.read(chunk_size))
-
-        return response
-    else:
-        # Return entire file
-        response = FileResponse(
-            open(video_path, "rb"), content_type=content_type, filename=job.video_name
-        )
-        response["Content-Length"] = str(file_size)
-        response["Accept-Ranges"] = "bytes"
-        return response
-
-
-def api_search_status(request):
-    """API endpoint to check search engine status."""
-    try:
-        stats = search_engine.get_stats()
-        return JsonResponse(
-            {
-                "available": stats["is_available"],
-                "initialized": stats["is_initialized"],
-                "model_name": stats.get("model_name", "Unknown"),
-                "indexed_segments": stats.get("indexed_segments", 0),
-            }
-        )
-    except Exception as e:
-        return JsonResponse({"available": False, "initialized": False, "error": str(e)})
-
-
+# Hybrid processing functions
 @csrf_exempt
-def api_rebuild_search_index(request):
-    """API endpoint to rebuild search index."""
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-
+def process_hybrid_batch(request):
+    """Process a batch of videos downloaded by the standalone downloader."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    
     try:
-        # Get all completed videos for indexing
-        videos = VideoJob.objects.filter(
-            status=JobStatus.COMPLETED, transcription__isnull=False
-        )
-
-        if not videos.exists():
-            return JsonResponse(
-                {"error": "No completed videos found to index"}, status=400
-            )
-
-        # Prepare segments for indexing
-        all_segments = []
-        for video in videos:
-            segments = video.text_segments
-            if segments:
-                for segment in segments:
-                    all_segments.append(
-                        {
-                            "video_id": str(video.job_id),
-                            "video_name": video.video_name,
-                            "text": segment["text"],
-                            "start_time": segment["start_time"],
-                            "end_time": segment["end_time"],
-                        }
-                    )
-
-        if not all_segments:
-            return JsonResponse(
-                {"error": "No text segments found to index"}, status=400
-            )
-
-        # Build the index
-        search_engine.build_index(all_segments)
-
-        # Get updated stats
-        stats = search_engine.get_stats()
-
-        return JsonResponse(
-            {
-                "success": True,
-                "message": f"Search index rebuilt successfully with {len(all_segments)} segments",
-                "segments_count": stats.get("indexed_segments", len(all_segments)),
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"Error rebuilding search index: {e}")
-        return JsonResponse({"error": str(e)}, status=500)
-
-
-@csrf_exempt
-def api_cleanup_youtube(request):
-    """API endpoint to cleanup YouTube videos."""
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-
-    try:
-        dry_run = request.POST.get("dry_run", "false").lower() == "true"
-
-        # Find YouTube videos that can be cleaned up
-        youtube_videos = []
-        total_size = 0
-
-        for video in VideoJob.objects.filter(status=JobStatus.COMPLETED):
-            video_path = Path(video.video_path)
-            if video_path.exists() and video.is_youtube_video():
-                size_mb = video_path.stat().st_size / (1024 * 1024)
-                youtube_videos.append(
-                    {
-                        "job_id": str(video.job_id),
-                        "name": video.video_name,
-                        "path": str(video_path),
-                        "size_mb": round(size_mb, 1),
-                    }
-                )
-                total_size += size_mb
-
-        if not youtube_videos:
-            return JsonResponse(
-                {
-                    "success": True,
-                    "message": "No YouTube videos found to clean up",
-                    "files_processed": 0,
-                    "space_freed_mb": 0,
-                    "dry_run": dry_run,
-                }
-            )
-
-        # Perform cleanup if not dry run
-        if not dry_run:
-            for video_info in youtube_videos:
-                video_path = Path(video_info["path"])
-                if video_path.exists():
-                    video_path.unlink()
-                    logger.info(f"Deleted YouTube video: {video_path}")
-
-        return JsonResponse(
-            {
-                "success": True,
-                "message": f'{"Would delete" if dry_run else "Deleted"} {len(youtube_videos)} YouTube video files',
-                "files_processed": len(youtube_videos),
-                "space_freed_mb": round(total_size, 1),
-                "dry_run": dry_run,
-                "files": youtube_videos,
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"Error cleaning up YouTube videos: {e}")
-        return JsonResponse({"error": str(e)}, status=500)
-
-
-@csrf_exempt
-def api_process_job(request):
-    """API endpoint to process a specific job."""
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-
-    try:
-        job_id = request.POST.get("job_id")
-        if not job_id:
-            return JsonResponse({"error": "Job ID required"}, status=400)
-
-        try:
-            job = VideoJob.objects.get(job_id=job_id)
-        except VideoJob.DoesNotExist:
-            return JsonResponse({"error": f"Job not found: {job_id}"}, status=404)
-
-        if job.status != JobStatus.PENDING:
-            return JsonResponse(
-                {"error": f"Job {job_id} is not pending (status: {job.status})"},
-                status=400,
-            )
-
-        # Start processing in background thread
-        def process_job():
+        data = json.loads(request.body)
+        batch_file = data.get('batch_file')
+        
+        if not batch_file or not Path(batch_file).exists():
+            return JsonResponse({'error': 'Batch file not found'}, status=400)
+        
+        # Load batch information
+        with open(batch_file, 'r') as f:
+            batch_info = json.load(f)
+        
+        downloads = batch_info.get('downloads', [])
+        if not downloads:
+            return JsonResponse({'error': 'No downloads in batch'}, status=400)
+        
+        processed_videos = []
+        
+        for download in downloads:
+            video_path = download.get('file_path')
+            metadata = download.get('metadata', {})
+            
+            if not video_path or not Path(video_path).exists():
+                logger.error(f"❌ Video file not found: {video_path}")
+                continue
+            
             try:
-                process_video_job(job.job_id)
+                # Create video job record with correct field names
+                video_job = VideoJob.objects.create(
+                    user=request.user if request.user.is_authenticated else User.objects.get(id=1),
+                    title=metadata.get('title', 'Hybrid Video'),
+                    video_name=Path(video_path).name,
+                    video_path=video_path,
+                    file_size_bytes=Path(video_path).stat().st_size,
+                    youtube_url=metadata.get('webpage_url', ''),
+                    status=JobStatus.PENDING
+                )
+                
+                logger.info(f"📝 Created VideoJob for: {video_job.title}")
+                
+                # Start processing using the existing video processing pipeline
+                try:
+                    # Use the existing process_video_job function
+                    process_video_job(video_job.job_id)
+                    
+                    # Refresh from database to get updated status
+                    video_job.refresh_from_db()
+                    
+                    if video_job.status == JobStatus.COMPLETED:
+                        processed_videos.append({
+                            'id': str(video_job.job_id),
+                            'title': video_job.title,
+                            'status': 'success'
+                        })
+                        logger.info(f"✅ Successfully processed: {video_job.title}")
+                    else:
+                        logger.error(f"❌ Processing failed for: {video_job.title}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error processing {video_path}: {e}")
+                    video_job.status = JobStatus.FAILED
+                    video_job.error_message = str(e)
+                    video_job.save()
+                    continue
+                    
             except Exception as e:
-                logger.error(f"Error processing job {job_id}: {e}")
-
-        thread = threading.Thread(target=process_job)
-        thread.daemon = True
-        thread.start()
-
-        return JsonResponse(
-            {
-                "success": True,
-                "message": f"Processing started for job {job_id}",
-                "job_id": job_id,
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"Error starting job processing: {e}")
-        return JsonResponse({"error": str(e)}, status=500)
-
-
-def api_timestamp_content(request, job_id):
-    """API endpoint to get content at specific timestamp."""
-    try:
-        timestamp = float(request.GET.get("timestamp", 0))
-
+                logger.error(f"❌ Error creating VideoJob for {video_path}: {e}")
+                continue
+        
+        # Mark batch as processed by moving the batch file to processed directory
         try:
-            job = VideoJob.objects.get(job_id=job_id)
-        except VideoJob.DoesNotExist:
-            return JsonResponse({"error": f"Job not found: {job_id}"}, status=404)
-
-        if job.status != JobStatus.COMPLETED or not job.transcription:
-            return JsonResponse(
-                {"error": "Video not processed or transcription not available"},
-                status=400,
-            )
-
-        # Find the segment containing this timestamp
-        segments = job.text_segments or []
-        current_segment = None
-
-        for segment in segments:
-            if segment["start_time"] <= timestamp <= segment["end_time"]:
-                current_segment = segment
-                break
-
-        if not current_segment:
-            return JsonResponse(
-                {"error": f"No content found at timestamp {timestamp}s"}, status=404
-            )
-
-        return JsonResponse(
-            {
-                "timestamp": timestamp,
-                "segment": current_segment,
-                "video_name": job.video_name,
-                "job_id": str(job.job_id),
-            }
-        )
-
-    except ValueError:
-        return JsonResponse({"error": "Invalid timestamp"}, status=400)
-    except Exception as e:
-        logger.error(f"Error getting timestamp content: {e}")
-        return JsonResponse({"error": str(e)}, status=500)
-
-
-def api_detailed_stats(request):
-    """API endpoint for detailed statistics."""
-    try:
-        # Basic stats
-        total_videos = VideoJob.objects.filter(status=JobStatus.COMPLETED).count()
-        pending_jobs = VideoJob.objects.filter(status=JobStatus.PENDING).count()
-        processing_jobs = VideoJob.objects.filter(status=JobStatus.PROCESSING).count()
-        failed_jobs = VideoJob.objects.filter(status=JobStatus.FAILED).count()
-
-        # Processing time stats
-        completed_jobs = VideoJob.objects.filter(
-            status=JobStatus.COMPLETED, processing_time__isnull=False
-        )
-        total_processing_time = sum(job.processing_time for job in completed_jobs)
-        avg_processing_time = (
-            total_processing_time / completed_jobs.count()
-            if completed_jobs.count() > 0
-            else 0
-        )
-
-        # Content stats
-        total_words = sum(
-            job.word_count or 0
-            for job in VideoJob.objects.filter(status=JobStatus.COMPLETED)
-        )
-        total_duration = sum(
-            job.duration_seconds or 0
-            for job in VideoJob.objects.filter(status=JobStatus.COMPLETED)
-        )
-
-        # Language distribution
-        language_stats = {}
-        for job in VideoJob.objects.filter(status=JobStatus.COMPLETED):
-            lang = job.language or "unknown"
-            language_stats[lang] = language_stats.get(lang, 0) + 1
-
-        # Recent activity (last 7 days)
-        from datetime import timedelta
-
-        week_ago = timezone.now() - timedelta(days=7)
-        recent_jobs = VideoJob.objects.filter(created_at__gte=week_ago).count()
-
-        # Storage stats
-        total_file_size = sum(
-            job.file_size_bytes or 0 for job in VideoJob.objects.all()
-        )
-
-        # Search stats
-        search_stats = {}
-        try:
-            search_stats = search_engine.get_stats()
+            processed_dir = Path('./downloads/processed')
+            processed_dir.mkdir(parents=True, exist_ok=True)
+            
+            batch_path = Path(batch_file)
+            processed_path = processed_dir / batch_path.name
+            
+            # Move the batch file to processed directory
+            batch_path.rename(processed_path)
+            logger.info(f"✅ Moved batch file to processed: {processed_path}")
+            
         except Exception as e:
-            search_stats = {"error": str(e)}
-
-        return JsonResponse(
-            {
-                "video_stats": {
-                    "total_videos": total_videos,
-                    "pending_jobs": pending_jobs,
-                    "processing_jobs": processing_jobs,
-                    "failed_jobs": failed_jobs,
-                    "recent_jobs_7_days": recent_jobs,
-                },
-                "processing_stats": {
-                    "total_processing_time": round(total_processing_time, 2),
-                    "average_processing_time": round(avg_processing_time, 2),
-                    "total_duration_hours": round(total_duration / 3600, 2),
-                },
-                "content_stats": {
-                    "total_words": total_words,
-                    "language_distribution": language_stats,
-                },
-                "storage_stats": {
-                    "total_file_size_gb": round(total_file_size / (1024**3), 2)
-                },
-                "search_stats": search_stats,
-            }
-        )
-
+            logger.error(f"❌ Error marking batch as processed: {e}")
+        
+        return JsonResponse({
+            'success': True,
+            'processed_videos': processed_videos,
+            'total_processed': len(processed_videos)
+        })
+        
     except Exception as e:
-        logger.error(f"Error getting detailed stats: {e}")
-        return JsonResponse({"error": str(e)}, status=500)
+        logger.error(f"❌ Hybrid batch processing failed: {e}")
+        return JsonResponse({'error': str(e)}, status=500)
 
-
-def api_pending_jobs(request):
-    """API endpoint to get pending jobs."""
+@csrf_exempt
+def api_hybrid_status(request):
+    """Check for available hybrid batches to process."""
     try:
-        pending_jobs = VideoJob.objects.filter(status=JobStatus.PENDING).order_by(
-            "-created_at"
-        )
+        downloads_dir = Path('./downloads/metadata')
+        processed_dir = Path('./downloads/processed')
+        
+        # Create processed directory if it doesn't exist
+        processed_dir.mkdir(parents=True, exist_ok=True)
+        
+        if not downloads_dir.exists():
+            return JsonResponse({
+                'batches_available': 0,
+                'batches': []
+            })
+        
+        # Only get batch files that haven't been processed yet
+        batch_files = list(downloads_dir.glob('batch_*.json'))
+        batches = []
+        
+        for batch_file in batch_files:
+            try:
+                with open(batch_file, 'r') as f:
+                    batch_info = json.load(f)
+                
+                # Check if this batch has already been processed
+                processed_file = processed_dir / batch_file.name
+                if processed_file.exists():
+                    # This batch has been processed, skip it
+                    continue
+                    
+                batches.append({
+                    'file_path': str(batch_file),
+                    'batch_name': batch_info.get('batch_name', 'Unknown'),
+                    'created_at': batch_info.get('created_at', 0),
+                    'total_videos': batch_info.get('total_videos', 0)
+                })
+            except:
+                continue
+        
+        # Sort by creation time (newest first)
+        batches.sort(key=lambda x: x['created_at'], reverse=True)
+        
+        return JsonResponse({
+            'batches_available': len(batches),
+            'batches': batches
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error checking hybrid status: {e}")
+        return JsonResponse({'error': str(e)}, status=500)
 
-        jobs_data = []
-        for job in pending_jobs:
-            jobs_data.append(
-                {
-                    "job_id": str(job.job_id),
-                    "video_name": job.video_name,
-                    "created_at": job.created_at.isoformat(),
-                    "file_size_mb": (
-                        round((job.file_size_bytes or 0) / (1024 * 1024), 1)
-                        if job.file_size_bytes
-                        else 0
-                    ),
+@extend_schema(
+    tags=['Search'],
+    summary='Search videos',
+    description='Search through video transcriptions using keyword, semantic, or hybrid search modes.',
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'query': {'type': 'string', 'description': 'Search query text'},
+                'search_mode': {'type': 'string', 'enum': ['keyword', 'semantic', 'hybrid'], 'default': 'hybrid', 'description': 'Search mode to use'}
+            },
+            'required': ['query']
+        }
+    },
+    responses={
+        200: {
+            'description': 'Search results',
+            'content': {
+                'application/json': {
+                    'example': {
+                        'success': True,
+                        'results': [],
+                        'query': 'example query',
+                        'search_mode': 'hybrid',
+                        'total_results': 0
+                    }
                 }
-            )
-
-        return JsonResponse({"pending_jobs": jobs_data, "count": len(jobs_data)})
-
-    except Exception as e:
-        logger.error(f"Error getting pending jobs: {e}")
-        return JsonResponse({"error": str(e)}, status=500)
-
-
-def clean_search_interface(request):
-    """Clean, user-facing search interface."""
-    return render(request, "video_processor/search_interface.html")
-
-
-def public_enhanced_search_interface(request):
-    """Public enhanced search interface with Phase 2 AI capabilities - no authentication required."""
-    return render(request, "video_processor/public_enhanced_search.html")
-
-
-def library_interface(request):
-    """Legacy library interface with full admin functionality."""
-    # Calculate statistics
-    total_videos = VideoJob.objects.filter(status=JobStatus.COMPLETED).count()
-    total_processing_time = sum(
-        job.processing_time or 0
-        for job in VideoJob.objects.filter(status=JobStatus.COMPLETED)
-    )
-    total_words = sum(
-        job.word_count or 0
-        for job in VideoJob.objects.filter(status=JobStatus.COMPLETED)
-    )
-    pending_jobs = VideoJob.objects.filter(status=JobStatus.PENDING).count()
-
-    # Check and initialize search engine if needed
-    search_available = False
-    try:
-        stats = search_engine.get_stats()
-        if stats["is_available"] and not stats["is_initialized"]:
-            logger.info("Initializing search engine for library interface...")
-            search_engine._load_index()
-            stats = search_engine.get_stats()
-        search_available = stats["is_initialized"]
-    except Exception as e:
-        logger.warning(f"Could not initialize search engine: {e}")
-
-    context = {
-        "videos": VideoJob.objects.filter(status=JobStatus.COMPLETED).order_by(
-            "-created_at"
-        ),
-        "stats": {
-            "total_videos": total_videos,
-            "total_processing_time": total_processing_time,
-            "total_words": total_words,
-            "pending_jobs": pending_jobs,
-        },
-        "query": None,
-        "search_results": None,
-        "semantic_available": search_available,
+            }
+        }
     }
-
-    return render(request, "video_processor/library.html", context)
-
-
+)
 @csrf_exempt
-def api_video_info(request, video_id):
-    """API endpoint to get video info for lightbox player."""
-    try:
-        video = VideoJob.objects.get(job_id=video_id)
-
-        response_data = {
-            "video_id": str(video.job_id),
-            "video_name": video.video_name,
-            "youtube_url": video.youtube_url or "",
-            "status": video.status,
-            "is_youtube": video.is_youtube_video(),
-        }
-
-        # Add YouTube video ID if it's a YouTube video
-        if video.is_youtube_video():
-            youtube_video_id = video.get_youtube_video_id()
-            response_data["youtube_video_id"] = youtube_video_id
-
-        return JsonResponse(response_data)
-    except VideoJob.DoesNotExist:
-        return JsonResponse({"error": "Video not found"}, status=404)
-
-
-def serve_video_file(request, video_id):
-    """Serve local video files."""
-    try:
-        video = VideoJob.objects.get(job_id=video_id)
-
-        # Check if this is a YouTube video
-        if video.is_youtube_video():
-            return JsonResponse(
-                {"error": "This is a YouTube video - use the YouTube URL instead"},
-                status=400,
-            )
-
-        # Check if local file exists
-        if video.video_path and os.path.exists(video.video_path):
-            return FileResponse(
-                open(video.video_path, "rb"),
-                content_type="video/mp4",
-                filename=os.path.basename(video.video_path),
-            )
-        else:
-            return HttpResponse("Video file not found", status=404)
-    except VideoJob.DoesNotExist:
-        return HttpResponse("Video not found", status=404)
-
-
-@csrf_exempt
-def api_clean_search(request):
-    """API endpoint for the clean search interface."""
+def api_search(request):
+    """API endpoint for video search that returns JSON."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
     try:
         data = json.loads(request.body)
         query = data.get("query", "").strip()
-        search_mode = data.get("mode", "hybrid")
+        search_mode = data.get("search_mode", "hybrid")  # keyword, semantic, hybrid
 
         if not query:
-            return JsonResponse({"error": "Search query is required"}, status=400)
+            return JsonResponse({"error": "Query is required"}, status=400)
 
-        logger.info(f"Clean search API: '{query}' (mode: {search_mode})")
+        # Track search query
+        VideoSearchQuery.objects.create(query=query, results_count=0)
 
-        # Perform search based on mode
-        if search_mode == "keyword":
-            results = convert_keyword_results_to_api_format(
-                perform_keyword_search(query)
-            )
-        elif (
-            search_mode == "semantic" and search_engine and search_engine.is_initialized
-        ):
-            semantic_results = search_engine.semantic_search(query, top_k=20)
-            results = convert_semantic_results_to_api_format(semantic_results)
-        elif search_mode == "hybrid" and search_engine and search_engine.is_initialized:
-            video_segments_data = get_video_segments_for_search()
-            semantic_results = search_engine.hybrid_search(
-                query, video_segments_data, top_k=20
-            )
-            results = convert_semantic_results_to_api_format(semantic_results)
-        else:
-            # Fall back to keyword search if semantic/hybrid not available
-            logger.info(
-                f"Search engine not available (engine: {search_engine}, mode: {search_mode}), falling back to keyword search"
-            )
-            results = convert_keyword_results_to_api_format(
-                perform_keyword_search(query)
-            )
-            search_mode = "keyword"
+        # Perform search based on selected mode
+        search_results = []
 
-        # Save search query
-        VideoSearchQuery.objects.create(query=query, results_count=len(results))
+        try:
+            if search_mode == "semantic" and search_engine and search_engine.is_initialized:
+                # Pure semantic search
+                semantic_results = search_engine.semantic_search(query, top_k=50)
+                search_results = convert_semantic_results_to_api_format(semantic_results)
 
-        return JsonResponse(
-            {
-                "results": results,
-                "count": len(results),
-                "query": query,
-                "mode": search_mode,
-                "message": f'Found {len(results)} results for "{query}"',
-            }
-        )
-
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON data"}, status=400)
-    except Exception as e:
-        logger.error(f"Error in clean search API: {e}")
-        return JsonResponse({"error": str(e)}, status=500)
-
-
-@csrf_exempt
-def api_public_enhanced_search(request):
-    """Public enhanced search API - searches across all videos without authentication."""
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-
-    try:
-        data = json.loads(request.body)
-        query = data.get("query", "").strip()
-
-        if not query:
-            return JsonResponse({"error": "Search query is required"}, status=400)
-
-        logger.info(f"Public enhanced search: '{query}'")
-
-        # Check if Phase 2 enhanced search is available
-        if PHASE2_AI_AVAILABLE and enhanced_search:
-            try:
-                # Use enhanced search engine
-                results = enhanced_search.search(query, k=20)
-
-                # Convert to API format
-                api_results = []
-                for result in results:
-                    api_results.append(
-                        {
-                            "video_id": result.video_id,
-                            "title": result.video_title,
-                            "content": result.segment_text,
-                            "timestamp": result.start_time,
-                            "confidence_score": result.confidence_score,
-                            "topic": result.topic_tags,
-                            "enhanced": True,
-                        }
-                    )
-
-                return JsonResponse(
-                    {
-                        "results": api_results,
-                        "count": len(api_results),
-                        "query": query,
-                        "enhanced": True,
-                        "message": f'Found {len(api_results)} enhanced results for "{query}"',
-                    }
+            elif search_mode == "hybrid" and search_engine and search_engine.is_initialized:
+                # Hybrid search (combines semantic + keyword)
+                video_segments_data = get_video_segments_for_search()
+                hybrid_results = search_engine.hybrid_search(
+                    query, video_segments_data, top_k=50
                 )
+                search_results = convert_semantic_results_to_api_format(hybrid_results)
 
-            except Exception as e:
-                logger.error(f"Enhanced search error: {e}")
-                # Fall back to regular search
+            else:
+                # Fallback to keyword search
+                keyword_results = perform_keyword_search(query)
+                search_results = convert_keyword_results_to_api_format(keyword_results)
 
-        # Fall back to regular semantic search
-        if search_engine and search_engine.is_initialized:
-            semantic_results = search_engine.semantic_search(query, top_k=20)
-            results = convert_semantic_results_to_api_format(semantic_results)
-        else:
-            # Fall back to keyword search
-            logger.info(
-                f"Search engine not available for public search, falling back to keyword search"
-            )
-            results = convert_keyword_results_to_api_format(
-                perform_keyword_search(query)
-            )
+        except Exception as e:
+            logger.error(f"Search error: {e}")
+            # Fallback to keyword search on any error
+            keyword_results = perform_keyword_search(query)
+            search_results = convert_keyword_results_to_api_format(keyword_results)
 
-        # Save search query
-        VideoSearchQuery.objects.create(query=query, results_count=len(results))
-
-        return JsonResponse(
-            {
-                "results": results,
-                "count": len(results),
-                "query": query,
-                "enhanced": False,
-                "message": f'Found {len(results)} results for "{query}"',
-            }
+        # Update search query results count
+        VideoSearchQuery.objects.filter(query=query).update(
+            results_count=len(search_results)
         )
 
+        return JsonResponse({
+            "success": True,
+            "results": search_results,
+            "query": query,
+            "search_mode": search_mode,
+            "total_results": len(search_results)
+        })
+
     except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON data"}, status=400)
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
     except Exception as e:
-        logger.error(f"Error in public enhanced search API: {e}")
+        logger.error(f"API search error: {e}")
         return JsonResponse({"error": str(e)}, status=500)
 
 
+@extend_schema(
+    tags=['Search'],
+    summary='Enhanced video search',
+    description='Advanced semantic search with diversification, topic filtering, and similarity thresholds.',
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'query': {'type': 'string', 'description': 'Search query text'},
+                'k': {'type': 'integer', 'default': 20, 'description': 'Number of results to return'},
+                'min_similarity': {'type': 'number', 'default': 0.3, 'description': 'Minimum similarity score (0-1)'},
+                'diversify': {'type': 'boolean', 'default': True, 'description': 'Enable result diversification'},
+                'max_per_video': {'type': 'integer', 'default': 3, 'description': 'Maximum results per video'},
+                'filter_topics': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Filter by topic tags'}
+            },
+            'required': ['query']
+        }
+    },
+    responses={200: {'description': 'Enhanced search results'}}
+)
+@csrf_exempt  
+def api_enhanced_search(request):
+    """API endpoint for enhanced search that returns JSON."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    try:
+        data = json.loads(request.body)
+        query = data.get("query", "").strip()
+        
+        # Enhanced search parameters
+        k = data.get("k", 20)  # Default to 20 results instead of 50
+        min_similarity = data.get("min_similarity", 0.3)
+        diversify = data.get("diversify", True)  # Enable diversification by default
+        max_per_video = data.get("max_per_video", 3)  # Max 3 results per video
+        filter_topics = data.get("filter_topics", None)
+
+        if not query:
+            return JsonResponse({"error": "Query is required"}, status=400)
+
+        # Use enhanced search if available, otherwise fall back to regular search
+        search_results = []
+        search_mode = "enhanced"
+        
+        try:
+            if enhanced_search and PHASE2_AI_AVAILABLE:
+                # Try enhanced semantic search with diversification
+                try:
+                    enhanced_results = enhanced_search.search(
+                        query=query,
+                        k=k,
+                        min_similarity=min_similarity,
+                        filter_topics=filter_topics,
+                        diversify_results=diversify,
+                        max_results_per_video=max_per_video
+                    )
+                    search_results = convert_enhanced_results_to_api_format(enhanced_results)
+                    search_mode = "enhanced_diversified" if diversify else "enhanced"
+                except Exception as enhanced_error:
+                    logger.warning(f"Enhanced search failed, falling back to regular search: {enhanced_error}")
+                    # Fall back to regular semantic search
+                    if search_engine and search_engine.is_initialized:
+                        semantic_results = search_engine.semantic_search(query, top_k=k)
+                        search_results = convert_semantic_results_to_api_format(semantic_results)
+                        search_mode = "semantic"
+                    else:
+                        # Fall back to keyword search
+                        keyword_results = perform_keyword_search(query)
+                        search_results = convert_keyword_results_to_api_format(keyword_results)
+                        search_mode = "keyword"
+            elif search_engine and search_engine.is_initialized:
+                # Fall back to regular semantic search
+                semantic_results = search_engine.semantic_search(query, top_k=k)
+                search_results = convert_semantic_results_to_api_format(semantic_results)
+                search_mode = "semantic"
+            else:
+                # Fall back to keyword search
+                keyword_results = perform_keyword_search(query)
+                search_results = convert_keyword_results_to_api_format(keyword_results)
+                search_mode = "keyword"
+
+        except Exception as e:
+            logger.error(f"Enhanced search error: {e}")
+            # Fallback to keyword search on any error
+            keyword_results = perform_keyword_search(query)
+            search_results = convert_keyword_results_to_api_format(keyword_results)
+            search_mode = "keyword_fallback"
+
+        # Add search statistics
+        video_count = len(set(result.get("video_id") for result in search_results))
+        
+        return JsonResponse({
+            "success": True,
+            "results": search_results,
+            "query": query,
+            "search_mode": search_mode,
+            "total_results": len(search_results),
+            "unique_videos": video_count,
+            "search_params": {
+                "k": k,
+                "min_similarity": min_similarity,
+                "diversify": diversify,
+                "max_per_video": max_per_video,
+                "filter_topics": filter_topics
+            }
+        })
+
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+    except Exception as e:
+        logger.error(f"API enhanced search error: {e}")
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@extend_schema(
+    tags=['Search'],
+    summary='RAG-based question answering',
+    description='Answer questions using Retrieval-Augmented Generation (RAG) based on video transcriptions.',
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'question': {'type': 'string', 'description': 'Question to answer'},
+                'method': {'type': 'string', 'enum': ['auto', 'extractive', 'generative'], 'default': 'auto'},
+                'include_sources': {'type': 'boolean', 'default': True, 'description': 'Include source segments'},
+                'filter_topics': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Filter by topic tags'}
+            },
+            'required': ['question']
+        }
+    },
+    responses={200: {'description': 'RAG Q&A response'}}
+)
 @csrf_exempt
-def api_public_rag_question_answer(request):
-    """Public RAG-based Q&A API - answers questions using all video content without authentication."""
+def api_rag_qa(request):
+    """API endpoint for RAG-based question answering."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
@@ -1507,1399 +1568,612 @@ def api_public_rag_question_answer(request):
         if not question:
             return JsonResponse({"error": "Question is required"}, status=400)
 
-        logger.info(f"Public RAG Q&A: '{question}'")
+        # Get RAG Q&A system
+        if not PHASE2_AI_AVAILABLE or rag_qa is None:
+            return JsonResponse({
+                "error": "RAG Q&A system not available"
+            }, status=503)
 
-        # Check if RAG system is available
-        if PHASE2_AI_AVAILABLE and rag_qa:
-            try:
-                # Use RAG Q&A system
-                result = rag_qa.answer_question(question)
-
-                return JsonResponse(
-                    {
-                        "question": question,
-                        "answer": result.answer,
-                        "confidence": result.confidence,
-                        "sources": [
-                            {
-                                "video_id": source.video_id,
-                                "title": source.title,
-                                "content": source.content,
-                                "timestamp": source.timestamp,
-                                "relevance_score": source.relevance_score,
-                            }
-                            for source in result.sources
-                        ],
-                        "method": result.method,
-                        "enhanced": True,
-                    }
-                )
-
-            except Exception as e:
-                logger.error(f"RAG Q&A error: {e}")
-                # Fall back to simple search
-
-        # Fall back to simple search-based answer
-        if search_engine and search_engine.is_initialized:
-            search_results = search_engine.semantic_search(question, top_k=5)
-            api_results = convert_semantic_results_to_api_format(search_results)
-        else:
-            logger.info(
-                f"Search engine not available for Q&A, falling back to keyword search"
-            )
-            api_results = convert_keyword_results_to_api_format(
-                perform_keyword_search(question)
+        # Answer the question
+        try:
+            qa_result = rag_qa.answer_question(
+                question=question,
+                method=data.get("method", "auto"),
+                include_sources=data.get("include_sources", True),
+                filter_topics=data.get("filter_topics", None)
             )
 
-        # Create a simple answer from search results
-        answer = (
-            "Based on the available video content, here are the most relevant segments:"
-        )
-        if api_results:
-            answer += f" Found {len(api_results)} relevant segments."
-        else:
-            answer = "I couldn't find relevant information to answer your question."
+            # Convert sources to API format
+            sources = []
+            if qa_result.sources:
+                sources = convert_enhanced_results_to_api_format(qa_result.sources)
 
-        return JsonResponse(
-            {
+            return JsonResponse({
+                "success": True,
                 "question": question,
-                "answer": answer,
-                "confidence": 0.5 if api_results else 0.1,
-                "sources": api_results[:3],  # Top 3 sources
-                "method": "search_fallback",
-                "enhanced": False,
-            }
-        )
-
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON data"}, status=400)
-    except Exception as e:
-        logger.error(f"Error in public RAG Q&A API: {e}")
-        return JsonResponse({"error": str(e)}, status=500)
-
-
-# AI Enhancement Endpoints
-@csrf_exempt
-def api_ai_enhanced_search(request):
-    """AI-enhanced search with Q/A pairs, topic classification, and summaries (falls back to regular search)"""
-    if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
-
-    try:
-        data = json.loads(request.body)
-        query = data.get("query", "").strip()
-        search_mode = data.get("mode", "hybrid")
-        use_openai = data.get("use_openai", True)
-
-        if not query:
-            return JsonResponse({"error": "Query required"}, status=400)
-
-        logger.info(
-            f"AI Enhanced search: '{query}' (mode: {search_mode}, openai: {use_openai})"
-        )
-
-        # Check if AI is available
-        ai_available = AI_AVAILABLE
-        if AI_AVAILABLE:
-            try:
-                config = create_ai_config()
-                ai_available = config.has_any_tokens
-                if not ai_available:
-                    logger.info("No AI tokens found - falling back to regular search")
-            except Exception as e:
-                logger.warning(
-                    f"AI config check failed: {e} - falling back to regular search"
-                )
-                ai_available = False
-
-        # First, perform the regular search to get base results
-        search_results = []
-
-        try:
-            if search_mode == "semantic" and search_engine.is_initialized:
-                semantic_results = search_engine.semantic_search(query, top_k=20)
-                search_results = convert_semantic_results_to_display_format(
-                    semantic_results
-                )
-            elif search_mode == "hybrid" and search_engine.is_initialized:
-                video_segments_data = get_video_segments_for_search()
-                hybrid_results = search_engine.hybrid_search(
-                    query, video_segments_data, top_k=20
-                )
-                search_results = convert_semantic_results_to_display_format(
-                    hybrid_results
-                )
-            else:
-                search_results = perform_keyword_search(query)
-
-        except Exception as e:
-            logger.error(f"Base search error: {e}")
-            search_results = perform_keyword_search(query)
-
-        # If AI not available, return regular results in enhanced format
-        if not ai_available:
-            enhanced_api_results = []
-            for result in search_results[:20]:
-                enhanced_api_results.append(
-                    {
-                        "video_id": result.get("video_id", ""),
-                        "title": result.get("title", ""),
-                        "content": result.get("content", ""),
-                        "timestamp": result.get("timestamp", 0),
-                        "relevance_score": result.get("relevance_score", 0),
-                        "search_mode": search_mode,
-                        # Empty AI enhancements
-                        "ai_enhanced": False,
-                        "generated_questions": [],
-                        "topic_classification": None,
-                        "sentiment_score": None,
-                        "key_concepts": [],
-                        "summary": None,
-                        "confidence_score": result.get("relevance_score", 0),
-                    }
-                )
-
-            # Track search query
-            VideoSearchQuery.objects.create(
-                query=query, results_count=len(enhanced_api_results)
-            )
-
-            return JsonResponse(
-                {
-                    "results": enhanced_api_results,
-                    "total": len(enhanced_api_results),
-                    "query": query,
-                    "mode": search_mode,
-                    "ai_enhanced": False,
-                    "fallback_reason": "No AI tokens available",
-                    "ai_provider": None,
-                }
-            )
-
-        # Convert to format expected by AI enhancement
-        ai_input_results = []
-        for result in search_results[:10]:  # Limit to top 10 for AI processing
-            ai_input_results.append(
-                {
-                    "video_id": result.get("video_id", ""),
-                    "title": result.get("title", ""),
-                    "content": result.get("content", ""),
-                    "timestamp": result.get("timestamp", 0),
-                    "relevance_score": result.get("relevance_score", 0),
-                    "search_mode": search_mode,
-                }
-            )
-
-        # Apply AI enhancements asynchronously
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            enhanced_results = loop.run_until_complete(
-                enhance_search_with_ai(ai_input_results, use_openai)
-            )
-        except Exception as e:
-            logger.error(f"AI enhancement error: {e}")
-            # Return regular results if AI fails
-            enhanced_api_results = []
-            for result in search_results[:20]:
-                enhanced_api_results.append(
-                    {
-                        "video_id": result.get("video_id", ""),
-                        "title": result.get("title", ""),
-                        "content": result.get("content", ""),
-                        "timestamp": result.get("timestamp", 0),
-                        "relevance_score": result.get("relevance_score", 0),
-                        "search_mode": search_mode,
-                        "ai_enhanced": False,
-                        "generated_questions": [],
-                        "topic_classification": None,
-                        "sentiment_score": None,
-                        "key_concepts": [],
-                        "summary": None,
-                        "confidence_score": result.get("relevance_score", 0),
-                    }
-                )
-
-            return JsonResponse(
-                {
-                    "results": enhanced_api_results,
-                    "total": len(enhanced_api_results),
-                    "query": query,
-                    "mode": search_mode,
-                    "ai_enhanced": False,
-                    "fallback_reason": f"AI enhancement failed: {str(e)}",
-                    "ai_provider": None,
-                }
-            )
-
-        # Convert enhanced results back to API format
-        enhanced_api_results = []
-        for enhanced in enhanced_results:
-            result = {
-                "video_id": enhanced.video_id,
-                "title": enhanced.title,
-                "content": enhanced.content,
-                "timestamp": enhanced.timestamp,
-                "relevance_score": enhanced.relevance_score,
-                "search_mode": enhanced.search_mode,
-                # AI enhancements
-                "ai_enhanced": enhanced.ai_enhanced,
-                "generated_questions": enhanced.generated_questions or [],
-                "topic_classification": enhanced.topic_classification,
-                "sentiment_score": enhanced.sentiment_score,
-                "key_concepts": enhanced.key_concepts or [],
-                "summary": enhanced.summary,
-                "confidence_score": enhanced.confidence_score or 0.0,
-            }
-            enhanced_api_results.append(result)
-
-        # Track search query
-        VideoSearchQuery.objects.create(
-            query=query, results_count=len(enhanced_api_results)
-        )
-
-        # Determine if any results were actually AI enhanced
-        ai_enhanced_count = sum(1 for r in enhanced_results if r.ai_enhanced)
-
-        return JsonResponse(
-            {
-                "results": enhanced_api_results,
-                "total": len(enhanced_api_results),
-                "query": query,
-                "mode": search_mode,
-                "ai_enhanced": ai_enhanced_count > 0,
-                "ai_enhanced_count": ai_enhanced_count,
-                "ai_provider": (
-                    "openai"
-                    if use_openai
-                    else "huggingface" if ai_enhanced_count > 0 else None
-                ),
-            }
-        )
-
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-    except Exception as e:
-        logger.error(f"AI enhanced search error: {e}")
-        return JsonResponse({"error": f"AI search failed: {str(e)}"}, status=500)
-
-
-@csrf_exempt
-def api_ai_question_answer(request):
-    """Answer questions based on video content using AI (returns context if no AI available)"""
-    if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
-
-    try:
-        data = json.loads(request.body)
-        question = data.get("question", "").strip()
-        context_limit = data.get("context_limit", 3)
-
-        if not question:
-            return JsonResponse({"error": "Question required"}, status=400)
-
-        logger.info(f"AI Q/A: '{question}'")
-
-        # Check if AI is available
-        ai_available = AI_AVAILABLE
-        if AI_AVAILABLE:
-            try:
-                config = create_ai_config()
-                ai_available = config.has_any_tokens
-                if not ai_available:
-                    logger.info("No AI tokens found - returning context only")
-            except Exception as e:
-                logger.warning(f"AI config check failed: {e} - returning context only")
-                ai_available = False
-
-        # Search for relevant context
-        try:
-            if search_engine.is_initialized:
-                video_segments_data = get_video_segments_for_search()
-                context_results = search_engine.hybrid_search(
-                    question, video_segments_data, top_k=context_limit
-                )
-                context_data = convert_semantic_results_to_display_format(
-                    context_results
-                )
-            else:
-                context_data = perform_keyword_search(question)[:context_limit]
-        except Exception as e:
-            logger.error(f"Context search error: {e}")
-            context_data = perform_keyword_search(question)[:context_limit]
-
-        # If AI not available, return context only
-        if not ai_available:
-            return JsonResponse(
-                {
-                    "question": question,
-                    "answer": None,
-                    "ai_available": False,
-                    "fallback_reason": "No AI tokens available",
-                    "context_results": context_data,
-                    "context_count": len(context_data),
-                    "suggestion": "Based on the context above, you can find relevant information about your question.",
-                }
-            )
-
-        # Convert to format for AI
-        context_for_ai = []
-        for result in context_data:
-            context_for_ai.append(
-                {
-                    "content": result.get("content", ""),
-                    "title": result.get("title", ""),
-                    "timestamp": result.get("timestamp", 0),
-                }
-            )
-
-        # Get AI answer
-        try:
-            ai_engine = get_ai_engine()
-            if ai_engine:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                answer = loop.run_until_complete(
-                    ai_engine.answer_question(question, context_for_ai)
-                )
-
-                if answer:
-                    return JsonResponse(
-                        {
-                            "question": question,
-                            "answer": answer,
-                            "ai_available": True,
-                            "ai_enhanced": True,
-                            "context_results": context_data,
-                            "context_count": len(context_data),
-                        }
-                    )
-                else:
-                    return JsonResponse(
-                        {
-                            "question": question,
-                            "answer": None,
-                            "ai_available": True,
-                            "ai_enhanced": False,
-                            "fallback_reason": "Could not generate answer",
-                            "context_results": context_data,
-                            "context_count": len(context_data),
-                            "suggestion": "The AI could not generate an answer. Please check the context above for relevant information.",
-                        }
-                    )
-            else:
-                return JsonResponse(
-                    {
-                        "question": question,
-                        "answer": None,
-                        "ai_available": False,
-                        "fallback_reason": "AI engine not available",
-                        "context_results": context_data,
-                        "context_count": len(context_data),
-                    }
-                )
-
-        except Exception as e:
-            logger.error(f"AI Q/A error: {e}")
-            return JsonResponse(
-                {
-                    "question": question,
-                    "answer": None,
-                    "ai_available": True,
-                    "ai_enhanced": False,
-                    "fallback_reason": f"Answer generation failed: {str(e)}",
-                    "context_results": context_data,
-                    "context_count": len(context_data),
-                    "suggestion": "There was an error generating the AI answer. Please check the context above for relevant information.",
-                }
-            )
-
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-    except Exception as e:
-        logger.error(f"Q/A API error: {e}")
-        return JsonResponse({"error": f"Q/A failed: {str(e)}"}, status=500)
-
-
-def api_ai_status(request):
-    """Get AI system status and configuration"""
-    if not AI_AVAILABLE:
-        return JsonResponse(
-            {
-                "available": False,
-                "system_installed": False,
-                "tokens_available": False,
-                "error": "AI enhancement system not installed",
-            }
-        )
-
-    try:
-        config = create_ai_config()
-
-        return JsonResponse(
-            {
-                "available": True,
-                "system_installed": True,
-                "tokens_available": config.has_any_tokens,
-                "openai_token_available": config.has_openai_token,
-                "huggingface_token_available": config.has_huggingface_token,
-                "fallback_mode": not config.has_any_tokens,
-                "configuration": {
-                    "openai_model": config.openai_model,
-                    "openai_max_tokens": config.openai_max_tokens,
-                    "hf_qa_model": config.hf_qa_model,
-                    "hf_summarization_model": config.hf_summarization_model,
-                    "hf_classification_model": config.hf_classification_model,
-                    "hf_sentiment_model": config.hf_sentiment_model,
-                    "max_requests_per_minute": config.max_requests_per_minute,
-                    "request_delay": config.request_delay,
-                },
-                "status": (
-                    "AI tokens available - full functionality"
-                    if config.has_any_tokens
-                    else "No AI tokens - fallback to regular search"
-                ),
-            }
-        )
-
-    except Exception as e:
-        return JsonResponse(
-            {
-                "available": True,
-                "system_installed": True,
-                "tokens_available": False,
-                "configuration_error": str(e),
-                "status": "AI system installed but configuration failed - fallback to regular search",
-            }
-        )
-
-
-@login_required
-@csrf_exempt
-def edit_transcript(request, job_id):
-    """Allow users to edit transcript content."""
-    # Ensure user can only edit their own videos
-    job = get_object_or_404(VideoJob, job_id=job_id, user=request.user)
-
-    try:
-
-        if request.method == "GET":
-            # Return current transcript for editing
-            transcript_text = ""
-            if job.transcription and "segments" in job.transcription:
-                # Extract text from segments
-                segments = job.transcription["segments"]
-                transcript_text = "\n".join(
-                    [seg.get("text", "").strip() for seg in segments]
-                )
-            elif job.transcript:
-                transcript_text = job.transcript
-
-            return JsonResponse(
-                {
-                    "status": "success",
-                    "transcript": transcript_text,
-                    "job_id": str(job.job_id),
-                    "title": job.video_name,
-                }
-            )
-
-        elif request.method == "POST":
-            # Save edited transcript
-            data = json.loads(request.body)
-            new_transcript = data.get("transcript", "").strip()
-
-            # Update the transcript field
-            job.transcript = new_transcript
-
-            # Update transcription JSON structure if it exists
-            if job.transcription and "segments" in job.transcription:
-                # Split the edited text back into segments (simple approach)
-                lines = new_transcript.split("\n")
-                segments = job.transcription["segments"]
-
-                # Update segments with new text (preserve timing if available)
-                for i, line in enumerate(lines[: len(segments)]):
-                    if i < len(segments):
-                        segments[i]["text"] = line.strip()
-
-                # Add new segments for additional lines
-                for i in range(len(segments), len(lines)):
-                    segments.append(
-                        {
-                            "text": lines[i].strip(),
-                            "start": segments[-1]["end"] if segments else 0,
-                            "end": segments[-1]["end"] + 5 if segments else 5,
-                        }
-                    )
-
-                job.transcription["segments"] = segments
-
-            job.save()
-
-            # Rebuild search index if needed
-            try:
-                if search_engine.is_initialized:
-                    logger.info(
-                        f"Rebuilding search index after transcript edit for job {job_id}"
-                    )
-                    search_engine.rebuild_index()
-            except Exception as e:
-                logger.warning(f"Could not rebuild search index: {e}")
-
-            return JsonResponse(
-                {"status": "success", "message": "Transcript updated successfully"}
-            )
-
-    except json.JSONDecodeError:
-        return JsonResponse(
-            {"status": "error", "message": "Invalid JSON data"}, status=400
-        )
-    except Exception as e:
-        logger.error(f"Error editing transcript for job {job_id}: {e}")
-        return JsonResponse({"status": "error", "message": str(e)}, status=500)
-
-
-@login_required
-def transcript_editor_view(request, job_id):
-    """Render the transcript editor page."""
-    job = get_object_or_404(VideoJob, job_id=job_id, user=request.user)
-    return render(
-        request,
-        "video_processor/transcript_editor.html",
-        {"job": job, "job_id": str(job.job_id)},
-    )
-
-
-def health_check(request):
-    """Health check endpoint for Docker container monitoring."""
-    try:
-        # Check database connectivity
-        VideoJob.objects.count()
-
-        # Check if core services are available (safely)
-        search_engine_status = "unavailable"
-        try:
-            # Check if search_engine is defined and available
-            if (
-                "search_engine" in globals()
-                and search_engine is not None
-                and hasattr(search_engine, "is_available")
-            ):
-                search_engine_status = (
-                    "available" if search_engine.is_available else "unavailable"
-                )
-            else:
-                search_engine_status = "not_initialized"
-        except NameError:
-            search_engine_status = "not_defined"
-
-        # Check Phase 2 AI availability (safely)
-        phase2_status = "unavailable"
-        try:
-            if "PHASE2_AI_AVAILABLE" in globals():
-                phase2_status = "available" if PHASE2_AI_AVAILABLE else "unavailable"
-        except NameError:
-            phase2_status = "not_defined"
-
-        # Check enhanced search (safely)
-        enhanced_search_status = "unavailable"
-        try:
-            if "enhanced_search" in globals() and enhanced_search is not None:
-                enhanced_search_status = "available"
-        except NameError:
-            enhanced_search_status = "not_defined"
-
-        # Check RAG Q&A (safely)
-        rag_qa_status = "unavailable"
-        try:
-            if "rag_qa" in globals() and rag_qa is not None:
-                rag_qa_status = "available"
-        except NameError:
-            rag_qa_status = "not_defined"
-
-        health_status = {
-            "status": "healthy",
-            "timestamp": datetime.now().isoformat(),
-            "database": "connected",
-            "search_engine": search_engine_status,
-            "whisper": "available",  # If we got here, imports worked
-            "phase2_ai": phase2_status,
-            "enhanced_search": enhanced_search_status,
-            "rag_qa": rag_qa_status,
-        }
-
-        return JsonResponse(health_status)
-
-    except Exception as e:
-        health_status = {
-            "status": "unhealthy",
-            "timestamp": datetime.now().isoformat(),
-            "error": str(e),
-        }
-        return JsonResponse(health_status, status=503)
-
-
-@login_required
-@csrf_exempt
-def api_enhanced_search(request):
-    """Enhanced semantic search with better embeddings and filtering."""
-    if not PHASE2_AI_AVAILABLE or enhanced_search is None:
-        return JsonResponse(
-            {"status": "error", "message": "Enhanced search not available"}
-        )
-
-    if request.method != "POST":
-        return JsonResponse({"status": "error", "message": "POST required"})
-
-    try:
-        data = json.loads(request.body)
-        query = data.get("query", "").strip()
-
-        if not query:
-            return JsonResponse({"status": "error", "message": "Query required"})
-
-        # Enhanced search parameters
-        k = min(int(data.get("k", 10)), 50)
-        min_similarity = float(data.get("min_similarity", 0.3))
-        filter_topics = data.get("filter_topics", [])
-
-        logger.info(f"Enhanced search query: '{query}' by user {request.user.username}")
-
-        # Check if enhanced search engine is initialized
-        if not enhanced_search.is_initialized:
-            # Try to load from cache or build new index
-            if not enhanced_search._load_index():
-                # Build new enhanced index
-                user_videos = VideoJob.objects.filter(
-                    user=request.user, status=JobStatus.COMPLETED
-                )
-
-                segments = []
-                for video in user_videos:
-                    if video.transcription and "text_segments" in video.transcription:
-                        for segment in video.transcription["text_segments"]:
-                            segments.append(
-                                {
-                                    "text": segment.get("text", ""),
-                                    "video_id": str(video.job_id),
-                                    "video_title": video.video_name,
-                                    "start_time": segment.get("start", 0),
-                                    "end_time": segment.get("end", 0),
-                                }
-                            )
-
-                if segments:
-                    enhanced_search.build_enhanced_index(segments)
-
-        # Perform enhanced search
-        results = enhanced_search.search(
-            query=query,
-            k=k,
-            min_similarity=min_similarity,
-            filter_topics=filter_topics if filter_topics else None,
-        )
-
-        # Convert results to API format
-        search_results = []
-        for result in results:
-            search_results.append(
-                {
-                    "video_id": result.video_id,
-                    "video_title": result.video_title,
-                    "text": result.segment_text,
-                    "start_time": result.start_time,
-                    "end_time": result.end_time,
-                    "confidence": result.confidence_score,
-                    "semantic_similarity": result.semantic_similarity,
-                    "context_window": result.context_window,
-                    "topic_tags": result.topic_tags,
-                    "timestamp_formatted": f"{int(result.start_time // 60):02d}:{int(result.start_time % 60):02d}",
-                }
-            )
-
-        return JsonResponse(
-            {
-                "status": "success",
-                "results": search_results,
-                "total_results": len(results),
-                "query": query,
-                "search_type": "enhanced_semantic",
-                "processing_time": enhanced_search.stats.get("average_search_time", 0),
-                "model_info": {
-                    "model_name": enhanced_search.model_name,
-                    "total_segments": enhanced_search.stats.get("index_size", 0),
-                },
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"Enhanced search failed: {e}")
-        return JsonResponse(
-            {"status": "error", "message": f"Enhanced search failed: {str(e)}"},
-            status=500,
-        )
-
-
-@login_required
-@csrf_exempt
-def api_rag_question_answer(request):
-    """RAG-based question answering using enhanced search and QA models."""
-    if not PHASE2_AI_AVAILABLE or rag_qa is None:
-        return JsonResponse(
-            {"status": "error", "message": "RAG Q&A system not available"}
-        )
-
-    if request.method != "POST":
-        return JsonResponse({"status": "error", "message": "POST required"})
-
-    try:
-        data = json.loads(request.body)
-        question = data.get("question", "").strip()
-
-        if not question:
-            return JsonResponse({"status": "error", "message": "Question required"})
-
-        # QA parameters
-        method = data.get("method", "auto")  # auto, extractive, generative, hybrid
-        include_sources = data.get("include_sources", True)
-        filter_topics = data.get("filter_topics", [])
-
-        logger.info(f"RAG Q&A question: '{question}' by user {request.user.username}")
-
-        # Ensure enhanced search is initialized for the user
-        if not enhanced_search.is_initialized:
-            return JsonResponse(
-                {
-                    "status": "error",
-                    "message": "Enhanced search index not available. Please build index first.",
-                }
-            )
-
-        # Answer question using RAG
-        qa_result = rag_qa.answer_question(
-            question=question,
-            method=method,
-            include_sources=include_sources,
-            filter_topics=filter_topics if filter_topics else None,
-        )
-
-        # Format sources for API response
-        sources = []
-        if qa_result.sources:
-            for source in qa_result.sources:
-                sources.append(
-                    {
-                        "video_id": source.video_id,
-                        "video_title": source.video_title,
-                        "text": source.segment_text,
-                        "start_time": source.start_time,
-                        "end_time": source.end_time,
-                        "confidence": source.confidence_score,
-                        "topic_tags": source.topic_tags,
-                        "timestamp_formatted": f"{int(source.start_time // 60):02d}:{int(source.start_time % 60):02d}",
-                    }
-                )
-
-        return JsonResponse(
-            {
-                "status": "success",
-                "question": qa_result.question,
                 "answer": qa_result.answer,
                 "confidence": qa_result.confidence,
                 "method": qa_result.method,
-                "sources": sources,
                 "processing_time": qa_result.processing_time,
-                "metadata": qa_result.metadata,
-            }
-        )
+                "sources": sources,
+                "metadata": qa_result.metadata
+            })
 
-    except Exception as e:
-        logger.error(f"RAG Q&A failed: {e}")
-        return JsonResponse(
-            {"status": "error", "message": f"Question answering failed: {str(e)}"},
-            status=500,
-        )
-
-
-@login_required
-def api_enhanced_transcription_status(request):
-    """Check status of enhanced AI transcription capabilities."""
-    try:
-        status = {
-            "phase2_available": PHASE2_AI_AVAILABLE,
-            "enhanced_search": {
-                "available": enhanced_search is not None,
-                "initialized": (
-                    enhanced_search.is_initialized if enhanced_search else False
-                ),
-                "stats": enhanced_search.get_stats() if enhanced_search else {},
-            },
-            "enhanced_whisper": {
-                "available": enhanced_whisper is not None,
-                "stats": enhanced_whisper.get_stats() if enhanced_whisper else {},
-            },
-            "rag_qa": {
-                "available": rag_qa is not None,
-                "stats": rag_qa.get_stats() if rag_qa else {},
-            },
-        }
-
-        return JsonResponse({"status": "success", "ai_status": status})
-
-    except Exception as e:
-        logger.error(f"AI status check failed: {e}")
-        return JsonResponse({"status": "error", "message": str(e)}, status=500)
-
-
-@login_required
-@csrf_exempt
-def api_rebuild_enhanced_index(request):
-    """Rebuild enhanced search index with improved embeddings."""
-    if not PHASE2_AI_AVAILABLE or enhanced_search is None:
-        return JsonResponse(
-            {"status": "error", "message": "Enhanced search not available"}
-        )
-
-    if request.method != "POST":
-        return JsonResponse({"status": "error", "message": "POST required"})
-
-    try:
-        logger.info(
-            f"Rebuilding enhanced search index for user {request.user.username}"
-        )
-
-        # Get user's completed videos
-        user_videos = VideoJob.objects.filter(
-            user=request.user, status=JobStatus.COMPLETED
-        )
-
-        segments = []
-        video_count = 0
-
-        for video in user_videos:
-            if video.transcription and "text_segments" in video.transcription:
-                video_count += 1
-                for segment in video.transcription["text_segments"]:
-                    segments.append(
-                        {
-                            "text": segment.get("text", ""),
-                            "video_id": str(video.job_id),
-                            "video_title": video.video_name,
-                            "start_time": segment.get("start", 0),
-                            "end_time": segment.get("end", 0),
-                        }
-                    )
-
-        if not segments:
-            return JsonResponse(
-                {"status": "error", "message": "No transcribed videos found to index"}
-            )
-
-        # Build enhanced index
-        enhanced_search.build_enhanced_index(segments)
-
-        return JsonResponse(
-            {
-                "status": "success",
-                "message": f"Enhanced index rebuilt successfully",
-                "videos_processed": video_count,
-                "segments_indexed": len(segments),
-                "model_name": enhanced_search.model_name,
-                "build_time": enhanced_search.metadata.get("build_time", 0),
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"Enhanced index rebuild failed: {e}")
-        return JsonResponse(
-            {"status": "error", "message": f"Index rebuild failed: {str(e)}"},
-            status=500,
-        )
-
-
-@login_required
-def enhanced_search_interface(request):
-    """Render enhanced search interface for Phase 2 AI capabilities."""
-    return render(
-        request,
-        "video_processor/enhanced_search.html",
-        {
-            "phase2_available": PHASE2_AI_AVAILABLE,
-            "enhanced_search_ready": (
-                enhanced_search.is_initialized if enhanced_search else False
-            ),
-            "user": request.user,
-        },
-    )
-
-
-# PUBLIC USER-SPECIFIC SEARCH VIEWS
-# These allow public access to search a specific user's video library
-
-
-def public_user_search_interface(request, username):
-    """Public search interface for a specific user's video library."""
-    from django.contrib.auth.models import User
-    from django.shortcuts import get_object_or_404
-
-    # Check if user exists
-    try:
-        target_user = User.objects.get(username=username)
-    except User.DoesNotExist:
-        return render(
-            request,
-            "video_processor/user_not_found.html",
-            {"username": username},
-            status=404,
-        )
-
-    # Get user's video count for display
-    video_count = VideoJob.objects.filter(
-        user=target_user, status=JobStatus.COMPLETED
-    ).count()
-
-    return render(
-        request,
-        "video_processor/public_user_search.html",
-        {
-            "target_user": target_user,
-            "username": username,
-            "video_count": video_count,
-            "search_mode": "basic",
-        },
-    )
-
-
-def public_user_enhanced_search_interface(request, username):
-    """Public enhanced search interface for a specific user's video library."""
-    from django.contrib.auth.models import User
-    from django.shortcuts import get_object_or_404
-
-    # Check if user exists
-    try:
-        target_user = User.objects.get(username=username)
-    except User.DoesNotExist:
-        return render(
-            request,
-            "video_processor/user_not_found.html",
-            {"username": username},
-            status=404,
-        )
-
-    # Get user's video count for display
-    video_count = VideoJob.objects.filter(
-        user=target_user, status=JobStatus.COMPLETED
-    ).count()
-
-    return render(
-        request,
-        "video_processor/public_user_enhanced_search.html",
-        {
-            "target_user": target_user,
-            "username": username,
-            "video_count": video_count,
-            "search_mode": "enhanced",
-            "phase2_available": PHASE2_AI_AVAILABLE,
-            "enhanced_search_ready": (
-                enhanced_search.is_initialized if enhanced_search else False
-            ),
-        },
-    )
-
-
-# PUBLIC USER-SPECIFIC SEARCH APIs
-
-
-@csrf_exempt
-def api_public_user_search(request, username):
-    """Public search API for a specific user's video library - basic search."""
-    from django.contrib.auth.models import User
-
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-
-    try:
-        # Check if user exists
-        try:
-            target_user = User.objects.get(username=username)
-        except User.DoesNotExist:
-            return JsonResponse({"error": f'User "{username}" not found'}, status=404)
-
-        data = json.loads(request.body)
-        query = data.get("query", "").strip()
-
-        if not query:
-            return JsonResponse({"error": "Search query is required"}, status=400)
-
-        logger.info(f"Public user search: '{query}' for user '{username}'")
-
-        # Get user's videos for search
-        user_videos = VideoJob.objects.filter(
-            user=target_user, status=JobStatus.COMPLETED
-        )
-
-        if not user_videos.exists():
-            return JsonResponse(
-                {
-                    "results": [],
-                    "count": 0,
-                    "query": query,
-                    "username": username,
-                    "message": f'No videos found for user "{username}"',
-                }
-            )
-
-        # Use semantic search if available, otherwise fall back to keyword search
-        if search_engine and search_engine.is_initialized:
-            # Create user-specific segments for search
-            user_segments = []
-            for video in user_videos:
-                if video.transcription and "text_segments" in video.transcription:
-                    for segment in video.transcription["text_segments"]:
-                        user_segments.append(
-                            {
-                                "text": segment.get("text", ""),
-                                "video_id": str(video.job_id),
-                                "video_title": video.video_name,
-                                "start_time": segment.get("start", 0),
-                                "end_time": segment.get("end", 0),
-                                "user": target_user.username,
-                            }
-                        )
-
-            # Perform hybrid search on user's content
-            if user_segments:
-                hybrid_results = search_engine.hybrid_search(
-                    query, user_segments, top_k=20
-                )
-                results = convert_semantic_results_to_api_format(hybrid_results)
-            else:
-                results = []
-        else:
-            # Fall back to keyword search in user's content
-            results = perform_user_keyword_search(query, target_user)
-
-        return JsonResponse(
-            {
-                "results": results,
-                "count": len(results),
-                "query": query,
-                "username": username,
-                "enhanced": False,
-                "message": f"Found {len(results)} results in {target_user.username}'s videos",
-            }
-        )
+        except Exception as e:
+            logger.error(f"RAG Q&A error: {e}")
+            return JsonResponse({
+                "error": f"Failed to answer question: {str(e)}"
+            }, status=500)
 
     except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON data"}, status=400)
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
     except Exception as e:
-        logger.error(f"Error in public user search API: {e}")
+        logger.error(f"API RAG Q&A error: {e}")
         return JsonResponse({"error": str(e)}, status=500)
 
 
-@csrf_exempt
-def api_public_user_enhanced_search(request, username):
-    """Public enhanced search API for a specific user's video library."""
-    from django.contrib.auth.models import User
+def clean_video_name(video_name):
+    """Clean video name by removing YouTube IDs and file extensions."""
+    if not video_name:
+        return "Unknown Video"
+    
+    # Remove file extension
+    name_without_ext = video_name.rsplit('.', 1)[0] if '.' in video_name else video_name
+    
+    # Remove YouTube video ID pattern (11 characters at the end)
+    # Pattern: _hCqrovx0h6E or similar
+    import re
+    # Remove YouTube ID pattern: _ followed by 11 alphanumeric characters
+    cleaned_name = re.sub(r'_[a-zA-Z0-9_-]{11}$', '', name_without_ext)
+    
+    # If the name is now empty or just whitespace, return a fallback
+    if not cleaned_name.strip():
+        return "Video"
+    
+    return cleaned_name.strip()
 
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
+def convert_enhanced_results_to_api_format(enhanced_results):
+    """Convert enhanced search results to JSON-serializable format for API."""
+    api_results = []
 
-    try:
-        # Check if user exists
-        try:
-            target_user = User.objects.get(username=username)
-        except User.DoesNotExist:
-            return JsonResponse({"error": f'User "{username}" not found'}, status=404)
-
-        data = json.loads(request.body)
-        query = data.get("query", "").strip()
-
-        if not query:
-            return JsonResponse({"error": "Search query is required"}, status=400)
-
-        logger.info(f"Public user enhanced search: '{query}' for user '{username}'")
-
-        # Get user's videos
-        user_videos = VideoJob.objects.filter(
-            user=target_user, status=JobStatus.COMPLETED
+    for result in enhanced_results:
+        api_results.append(
+            {
+                "video_id": result.video_id,
+                "video_name": clean_video_name(result.video_title),
+                "start_time": result.start_time,
+                "end_time": result.end_time,
+                "text": result.segment_text,
+                "relevance_score": result.confidence_score,
+                "semantic_similarity": result.semantic_similarity,
+                "search_type": "enhanced",
+                "topic_tags": result.topic_tags,
+                "context_window": result.context_window[:200] + "..." if len(result.context_window) > 200 else result.context_window,
+                "sentiment_score": result.sentiment_score
+            }
         )
 
-        if not user_videos.exists():
-            return JsonResponse(
-                {
-                    "results": [],
-                    "count": 0,
-                    "query": query,
-                    "username": username,
-                    "enhanced": False,
-                    "message": f'No videos found for user "{username}"',
-                }
-            )
+    return api_results
 
-        # Check if Phase 2 enhanced search is available
+@csrf_exempt
+def health_check(request):
+    """Health check endpoint for load balancers and monitoring"""
+    try:
+        # Basic health checks
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        
+        return JsonResponse({
+            'status': 'healthy',
+            'timestamp': timezone.now().isoformat(),
+            'version': '1.0.0'
+        })
+    except Exception as e:
+        return JsonResponse({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': timezone.now().isoformat()
+        }, status=503)
+
+
+@extend_schema(
+    tags=['Health'],
+    summary='Health check',
+    description='Health check endpoint for load balancers and monitoring. Returns system status and component availability.',
+    responses={
+        200: {'description': 'System is healthy'},
+        503: {'description': 'System is unhealthy'}
+    }
+)
+@csrf_exempt
+def api_health_check(request):
+    """API health check endpoint for load balancers and monitoring"""
+    health_status = {
+        'status': 'healthy',
+        'timestamp': timezone.now().isoformat(),
+        'version': '1.0.0',
+        'components': {}
+    }
+    overall_healthy = True
+    
+    try:
+        # Database connectivity check
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        health_status['components']['database'] = 'available'
+    except Exception as e:
+        health_status['components']['database'] = f'unavailable: {str(e)}'
+        overall_healthy = False
+    
+    # Check search engine availability
+    try:
+        if search_available and search_engine:
+            if hasattr(search_engine, 'is_initialized') and search_engine.is_initialized:
+                health_status['components']['search_engine'] = 'available_initialized'
+            else:
+                health_status['components']['search_engine'] = 'available_not_initialized'
+        else:
+            health_status['components']['search_engine'] = 'unavailable'
+    except Exception as e:
+        health_status['components']['search_engine'] = f'unavailable: {str(e)}'
+    
+    # Check enhanced search
+    try:
         if PHASE2_AI_AVAILABLE and enhanced_search:
-            try:
-                # Build user-specific segments for enhanced search
-                user_segments = []
-                for video in user_videos:
-                    if video.transcription and "text_segments" in video.transcription:
-                        for segment in video.transcription["text_segments"]:
-                            user_segments.append(
-                                {
-                                    "text": segment.get("text", ""),
-                                    "video_id": str(video.job_id),
-                                    "video_title": video.video_name,
-                                    "start_time": segment.get("start", 0),
-                                    "end_time": segment.get("end", 0),
-                                }
-                            )
-
-                if user_segments:
-                    # Temporarily build index for this user's content
-                    enhanced_search.build_enhanced_index(user_segments)
-                    results = enhanced_search.search(query, k=20)
-
-                    # Convert to API format
-                    api_results = []
-                    for result in results:
-                        api_results.append(
-                            {
-                                "video_id": result.video_id,
-                                "title": result.video_title,
-                                "content": result.segment_text,
-                                "timestamp": result.start_time,
-                                "confidence_score": result.confidence_score,
-                                "topic": result.topic_tags,
-                                "enhanced": True,
-                            }
-                        )
-
-                    return JsonResponse(
-                        {
-                            "results": api_results,
-                            "count": len(api_results),
-                            "query": query,
-                            "username": username,
-                            "enhanced": True,
-                            "message": f"Found {len(api_results)} enhanced results in {target_user.username}'s videos",
-                        }
-                    )
-
-            except Exception as e:
-                logger.error(f"Enhanced search error for user {username}: {e}")
-                # Fall back to regular search
-
-        # Fall back to regular search
-        if search_engine and search_engine.is_initialized:
-            user_segments = []
-            for video in user_videos:
-                if video.transcription and "text_segments" in video.transcription:
-                    for segment in video.transcription["text_segments"]:
-                        user_segments.append(
-                            {
-                                "text": segment.get("text", ""),
-                                "video_id": str(video.job_id),
-                                "video_title": video.video_name,
-                                "start_time": segment.get("start", 0),
-                                "end_time": segment.get("end", 0),
-                            }
-                        )
-
-            if user_segments:
-                semantic_results = search_engine.hybrid_search(
-                    query, user_segments, top_k=20
-                )
-                results = convert_semantic_results_to_api_format(semantic_results)
-            else:
-                results = []
+            health_status['components']['enhanced_search'] = 'available'
         else:
-            # Fall back to keyword search
-            results = perform_user_keyword_search(query, target_user)
-
-        return JsonResponse(
-            {
-                "results": results,
-                "count": len(results),
-                "query": query,
-                "username": username,
-                "enhanced": False,
-                "message": f"Found {len(results)} results in {target_user.username}'s videos",
-            }
-        )
-
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON data"}, status=400)
+            health_status['components']['enhanced_search'] = 'unavailable'
     except Exception as e:
-        logger.error(f"Error in public user enhanced search API: {e}")
-        return JsonResponse({"error": str(e)}, status=500)
+        health_status['components']['enhanced_search'] = f'unavailable: {str(e)}'
+    
+    # Check Celery if configured
+    try:
+        from django.conf import settings
+        if hasattr(settings, 'CELERY_BROKER_URL') and settings.CELERY_BROKER_URL:
+            health_status['components']['celery'] = 'configured'
+        else:
+            health_status['components']['celery'] = 'not_configured'
+    except Exception:
+        health_status['components']['celery'] = 'unknown'
+    
+    if not overall_healthy:
+        health_status['status'] = 'unhealthy'
+        return JsonResponse(health_status, status=503)
+    
+    return JsonResponse(health_status)
 
 
 @csrf_exempt
-def api_public_user_rag_qa(request, username):
-    """Public RAG-based Q&A API for a specific user's video library."""
-    from django.contrib.auth.models import User
+def video_file_serve(request, job_id):
+    """Serve video files for playback with smart handling of cleaned up files"""
+    try:
+        # Get the video job without user restriction for public access
+        video_job = get_object_or_404(VideoJob, job_id=job_id)
+        
+        # Check if video file exists and is not cleaned up
+        video_path = video_job.video_path
+        if not video_path or "[CLEANED_UP]" in str(video_path):
+            # File has been cleaned up - return info about this
+            response_data = {
+                "error": "Video file has been cleaned up to save storage",
+                "video_name": video_job.video_name,
+                "is_youtube": hasattr(video_job, 'youtube_url') and bool(video_job.youtube_url),
+                "youtube_url": getattr(video_job, 'youtube_url', None),
+                "duration_seconds": video_job.duration_seconds,
+                "cleaned_up": True
+            }
+            
+            # If it's a YouTube video, try to extract video ID and provide proper URLs
+            if response_data["is_youtube"] and response_data["youtube_url"]:
+                import re
+                youtube_patterns = [
+                    r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/)([a-zA-Z0-9_-]{11})',
+                    r'youtube\.com/watch\?.*v=([a-zA-Z0-9_-]{11})',
+                    r'youtu\.be/([a-zA-Z0-9_-]{11})',
+                    r'youtube\.com/embed/([a-zA-Z0-9_-]{11})'
+                ]
+                
+                for pattern in youtube_patterns:
+                    match = re.search(pattern, response_data["youtube_url"])
+                    if match:
+                        video_id = match.group(1)
+                        response_data["youtube_video_id"] = video_id
+                        response_data["youtube_watch_url"] = f"https://www.youtube.com/watch?v={video_id}"
+                        response_data["youtube_embed_url"] = f"https://www.youtube.com/embed/{video_id}"
+                        break
+            
+            # If no YouTube URL but filename contains YouTube video ID, extract it
+            if not response_data.get("youtube_video_id") and video_path:
+                import re
+                # Extract YouTube video ID from filename (common pattern: ID_title.mp4)
+                # Look for 11-character YouTube video ID at the beginning of the filename
+                filename_pattern = r'^([a-zA-Z0-9_-]{11})_'
+                match = re.search(filename_pattern, os.path.basename(video_path))
+                if match:
+                    video_id = match.group(1)
+                    response_data["youtube_video_id"] = video_id
+                    response_data["is_youtube"] = True
+                    response_data["youtube_url"] = f"https://www.youtube.com/watch?v={video_id}"
+                    response_data["youtube_watch_url"] = f"https://www.youtube.com/watch?v={video_id}"
+                    response_data["youtube_embed_url"] = f"https://www.youtube.com/embed/{video_id}"
+            
+            return JsonResponse(response_data, status=404)
+        
+        if not os.path.exists(video_path):
+            return JsonResponse({
+                "error": "Video file not found",
+                "video_name": video_job.video_name,
+                "cleaned_up": True
+            }, status=404)
+        
+        # Serve the video file
+        file_size = os.path.getsize(video_path)
+        
+        # Set appropriate headers for video streaming
+        response = FileResponse(
+            open(video_path, 'rb'),
+            content_type='video/mp4'
+        )
+        response['Accept-Ranges'] = 'bytes'
+        response['Content-Length'] = file_size
+        
+        return response
+        
+    except VideoJob.DoesNotExist:
+        return JsonResponse({"error": "Video not found"}, status=404)
+    except Exception as e:
+        logger.error(f"Error serving video file: {e}")
+        return JsonResponse({"error": "Internal server error"}, status=500)
 
+
+@extend_schema(
+    tags=['Teams'],
+    summary='Get teams summary',
+    description='Get summary statistics for the current user\'s video collection.',
+    responses={200: {'description': 'Teams summary data'}}
+)
+@csrf_exempt
+def api_teams_summary(request):
+    """API endpoint for teams summary - placeholder for frontend compatibility"""
+    try:
+        # Get current user's video statistics
+        if not request.user.is_authenticated:
+            return JsonResponse({"error": "Authentication required"}, status=401)
+        
+        # Get user's video statistics
+        total_videos = VideoJob.objects.filter(user=request.user).count()
+        completed_videos = VideoJob.objects.filter(user=request.user, status='completed').count()
+        processing_videos = VideoJob.objects.filter(user=request.user, status='processing').count()
+        failed_videos = VideoJob.objects.filter(user=request.user, status='failed').count()
+        
+        # Calculate total storage used
+        total_storage = sum(
+            job.file_size_bytes or 0 
+            for job in VideoJob.objects.filter(user=request.user)
+        )
+        
+        return JsonResponse({
+            "success": True,
+            "data": {
+                "total_videos": total_videos,
+                "completed_videos": completed_videos,
+                "processing_videos": processing_videos,
+                "failed_videos": failed_videos,
+                "total_storage_bytes": total_storage,
+                "total_storage_mb": round(total_storage / (1024 * 1024), 2),
+                "user_id": request.user.id,
+                "username": request.user.username,
+                "email": request.user.email
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in teams summary: {e}")
+        return JsonResponse({
+            "success": False,
+            "error": "Failed to get teams summary"
+        }, status=500)
+
+
+@extend_schema(
+    tags=['Teams'],
+    summary='Get teams list',
+    description='Get list of teams for the current user.',
+    responses={200: {'description': 'Teams list'}}
+)
+@csrf_exempt
+def api_teams_list(request):
+    """API endpoint for teams list - placeholder for frontend compatibility"""
+    try:
+        if not request.user.is_authenticated:
+            return JsonResponse({"error": "Authentication required"}, status=401)
+        
+        # For now, return a simple team structure
+        # In a real implementation, this would return actual team data
+        return JsonResponse({
+            "success": True,
+            "data": {
+                "teams": [
+                    {
+                        "id": 1,
+                        "name": "Personal Videos",
+                        "description": "Your personal video collection",
+                        "member_count": 1,
+                        "video_count": VideoJob.objects.filter(user=request.user).count(),
+                        "created_at": request.user.date_joined.isoformat()
+                    }
+                ]
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in teams list: {e}")
+        return JsonResponse({
+            "success": False,
+            "error": "Failed to get teams list"
+        }, status=500)
+
+@extend_schema(
+    tags=['Search'],
+    summary='Advanced search',
+    description='Advanced search API with comprehensive controls including search type selection, similarity thresholds, diversification, and result filtering.',
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'query': {'type': 'string', 'description': 'Search query text'},
+                'k': {'type': 'integer', 'default': 25, 'description': 'Number of results'},
+                'min_similarity': {'type': 'number', 'default': 0.25, 'description': 'Minimum similarity score'},
+                'diversify': {'type': 'boolean', 'default': True, 'description': 'Enable diversification'},
+                'max_per_video': {'type': 'integer', 'default': 2, 'description': 'Max results per video'},
+                'filter_topics': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Topic filters'},
+                'search_type': {'type': 'string', 'enum': ['enhanced', 'semantic', 'keyword', 'hybrid'], 'default': 'enhanced'},
+                'include_context': {'type': 'boolean', 'default': True, 'description': 'Include context window'},
+                'include_sentiment': {'type': 'boolean', 'default': False, 'description': 'Include sentiment scores'}
+            },
+            'required': ['query']
+        }
+    },
+    responses={200: {'description': 'Advanced search results'}}
+)
+@csrf_exempt
+def api_advanced_search(request):
+    """Advanced search API with more controls and features."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
     try:
-        # Check if user exists
-        try:
-            target_user = User.objects.get(username=username)
-        except User.DoesNotExist:
-            return JsonResponse({"error": f'User "{username}" not found'}, status=404)
-
         data = json.loads(request.body)
-        question = data.get("question", "").strip()
+        query = data.get("query", "").strip()
+        
+        # Advanced search parameters
+        k = data.get("k", 25)
+        min_similarity = data.get("min_similarity", 0.25)
+        diversify = data.get("diversify", True)
+        max_per_video = data.get("max_per_video", 2)
+        filter_topics = data.get("filter_topics", None)
+        search_type = data.get("search_type", "enhanced")  # enhanced, semantic, keyword, hybrid
+        include_context = data.get("include_context", True)
+        include_sentiment = data.get("include_sentiment", False)
 
-        if not question:
-            return JsonResponse({"error": "Question is required"}, status=400)
+        if not query:
+            return JsonResponse({"error": "Query is required"}, status=400)
 
-        logger.info(f"Public user RAG Q&A: '{question}' for user '{username}'")
+        search_results = []
+        search_mode = search_type
+        
+        try:
+            if search_type == "enhanced" and enhanced_search and PHASE2_AI_AVAILABLE:
+                # Enhanced search with all features
+                enhanced_results = enhanced_search.search(
+                    query=query,
+                    k=k,
+                    min_similarity=min_similarity,
+                    filter_topics=filter_topics,
+                    diversify_results=diversify,
+                    max_results_per_video=max_per_video
+                )
+                search_results = convert_enhanced_results_to_api_format(enhanced_results)
+                search_mode = "enhanced_advanced"
+                
+            elif search_type == "semantic" and search_engine and search_engine.is_initialized:
+                # Regular semantic search
+                semantic_results = search_engine.semantic_search(query, top_k=k)
+                search_results = convert_semantic_results_to_api_format(semantic_results)
+                search_mode = "semantic"
+                
+            elif search_type == "keyword":
+                # Keyword search
+                keyword_results = perform_keyword_search(query)
+                search_results = convert_keyword_results_to_api_format(keyword_results)
+                search_mode = "keyword"
+                
+            elif search_type == "hybrid":
+                # Hybrid search combining multiple methods
+                hybrid_results = []
+                
+                # Get enhanced results
+                if enhanced_search and PHASE2_AI_AVAILABLE:
+                    try:
+                        enhanced_results = enhanced_search.search(
+                            query=query,
+                            k=k//2,
+                            min_similarity=min_similarity,
+                            diversify_results=diversify,
+                            max_results_per_video=max_per_video
+                        )
+                        hybrid_results.extend(convert_enhanced_results_to_api_format(enhanced_results))
+                    except Exception as e:
+                        logger.warning(f"Enhanced search in hybrid failed: {e}")
+                
+                # Get semantic results
+                if search_engine and search_engine.is_initialized:
+                    try:
+                        semantic_results = search_engine.semantic_search(query, top_k=k//2)
+                        semantic_api_results = convert_semantic_results_to_api_format(semantic_results)
+                        # Avoid duplicates by checking video_id and start_time
+                        existing_keys = set((r["video_id"], r["start_time"]) for r in hybrid_results)
+                        for result in semantic_api_results:
+                            key = (result["video_id"], result["start_time"])
+                            if key not in existing_keys:
+                                hybrid_results.append(result)
+                    except Exception as e:
+                        logger.warning(f"Semantic search in hybrid failed: {e}")
+                
+                # If no results from AI methods, fall back to keyword
+                if not hybrid_results:
+                    keyword_results = perform_keyword_search(query)
+                    hybrid_results = convert_keyword_results_to_api_format(keyword_results)
+                
+                search_results = hybrid_results
+                search_mode = "hybrid"
+                
+            else:
+                # Fallback to best available method
+                if enhanced_search and PHASE2_AI_AVAILABLE:
+                    enhanced_results = enhanced_search.search(query, k=k)
+                    search_results = convert_enhanced_results_to_api_format(enhanced_results)
+                    search_mode = "enhanced_fallback"
+                elif search_engine and search_engine.is_initialized:
+                    semantic_results = search_engine.semantic_search(query, top_k=k)
+                    search_results = convert_semantic_results_to_api_format(semantic_results)
+                    search_mode = "semantic_fallback"
+                else:
+                    keyword_results = perform_keyword_search(query)
+                    search_results = convert_keyword_results_to_api_format(keyword_results)
+                    search_mode = "keyword_fallback"
 
-        # Get user's videos
-        user_videos = VideoJob.objects.filter(
-            user=target_user, status=JobStatus.COMPLETED
-        )
+        except Exception as e:
+            logger.error(f"Advanced search error: {e}")
+            # Fallback to keyword search
+            keyword_results = perform_keyword_search(query)
+            search_results = convert_keyword_results_to_api_format(keyword_results)
+            search_mode = "keyword_fallback"
 
-        if not user_videos.exists():
-            return JsonResponse(
-                {
-                    "question": question,
-                    "answer": f"No videos found for user '{username}' to answer questions about.",
-                    "confidence": 0.0,
-                    "sources": [],
-                    "method": "no_content",
-                    "username": username,
-                    "enhanced": False,
-                }
-            )
+        # Calculate statistics
+        video_count = len(set(result.get("video_id") for result in search_results))
+        avg_confidence = sum(result.get("relevance_score", 0) for result in search_results) / len(search_results) if search_results else 0
+        
+        # Filter results based on include_context and include_sentiment
+        if not include_context:
+            for result in search_results:
+                result.pop("context_window", None)
+        
+        if not include_sentiment:
+            for result in search_results:
+                result.pop("sentiment_score", None)
 
-        # Check if RAG system is available
-        if PHASE2_AI_AVAILABLE and rag_qa:
-            try:
-                # Build user-specific segments for RAG
-                user_segments = []
-                for video in user_videos:
-                    if video.transcription and "text_segments" in video.transcription:
-                        for segment in video.transcription["text_segments"]:
-                            user_segments.append(
-                                {
-                                    "text": segment.get("text", ""),
-                                    "video_id": str(video.job_id),
-                                    "video_title": video.video_name,
-                                    "start_time": segment.get("start", 0),
-                                    "end_time": segment.get("end", 0),
-                                }
-                            )
-
-                if user_segments:
-                    # Temporarily build index for this user's content
-                    enhanced_search.build_enhanced_index(user_segments)
-                    result = rag_qa.answer_question(question)
-
-                    return JsonResponse(
-                        {
-                            "question": question,
-                            "answer": result.answer,
-                            "confidence": result.confidence,
-                            "sources": [
-                                {
-                                    "video_id": source.video_id,
-                                    "title": source.video_title,
-                                    "content": source.segment_text,
-                                    "timestamp": source.start_time,
-                                    "relevance_score": source.confidence_score,
-                                }
-                                for source in result.sources
-                            ],
-                            "method": result.method,
-                            "username": username,
-                            "enhanced": True,
-                        }
-                    )
-
-            except Exception as e:
-                logger.error(f"RAG Q&A error for user {username}: {e}")
-                # Fall back to simple search
-
-        # Fall back to simple search-based answer
-        user_segments = []
-        for video in user_videos:
-            if video.transcription and "text_segments" in video.transcription:
-                for segment in video.transcription["text_segments"]:
-                    user_segments.append(
-                        {
-                            "text": segment.get("text", ""),
-                            "video_id": str(video.job_id),
-                            "video_title": video.video_name,
-                            "start_time": segment.get("start", 0),
-                            "end_time": segment.get("end", 0),
-                        }
-                    )
-
-        if search_engine and search_engine.is_initialized and user_segments:
-            search_results = search_engine.hybrid_search(
-                question, user_segments, top_k=5
-            )
-            api_results = convert_semantic_results_to_api_format(search_results)
-        else:
-            api_results = perform_user_keyword_search(question, target_user)[:5]
-
-        # Create a simple answer from search results
-        answer = f"Based on {target_user.username}'s video content, here are the most relevant segments:"
-        if api_results:
-            answer += f" Found {len(api_results)} relevant segments."
-        else:
-            answer = f"I couldn't find relevant information in {target_user.username}'s videos to answer your question."
-
-        return JsonResponse(
-            {
-                "question": question,
-                "answer": answer,
-                "confidence": 0.5 if api_results else 0.1,
-                "sources": api_results[:3],  # Top 3 sources
-                "method": "search_fallback",
-                "username": username,
-                "enhanced": False,
+        return JsonResponse({
+            "success": True,
+            "results": search_results,
+            "query": query,
+            "search_mode": search_mode,
+            "total_results": len(search_results),
+            "unique_videos": video_count,
+            "average_confidence": round(avg_confidence, 3),
+            "search_params": {
+                "k": k,
+                "min_similarity": min_similarity,
+                "diversify": diversify,
+                "max_per_video": max_per_video,
+                "filter_topics": filter_topics,
+                "search_type": search_type,
+                "include_context": include_context,
+                "include_sentiment": include_sentiment
             }
-        )
+        })
 
     except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON data"}, status=400)
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
     except Exception as e:
-        logger.error(f"Error in public user RAG Q&A API: {e}")
+        logger.error(f"API advanced search error: {e}")
         return JsonResponse({"error": str(e)}, status=500)
 
+@csrf_exempt
+def api_hybrid_processed_status(request):
+    """Check for processed hybrid batches."""
+    try:
+        processed_dir = Path('./downloads/processed')
+        processed_dir.mkdir(parents=True, exist_ok=True)
+        
+        if not processed_dir.exists():
+            return JsonResponse({
+                'processed_batches': 0,
+                'batches': []
+            })
+        
+        batch_files = list(processed_dir.glob('batch_*.json'))
+        batches = []
+        
+        for batch_file in batch_files:
+            try:
+                with open(batch_file, 'r') as f:
+                    batch_info = json.load(f)
+                    
+                batches.append({
+                    'file_path': str(batch_file),
+                    'batch_name': batch_info.get('batch_name', 'Unknown'),
+                    'created_at': batch_info.get('created_at', 0),
+                    'total_videos': batch_info.get('total_videos', 0),
+                    'processed_at': batch_file.stat().st_mtime  # File modification time
+                })
+            except:
+                continue
+        
+        # Sort by processing time (newest first)
+        batches.sort(key=lambda x: x['processed_at'], reverse=True)
+        
+        return JsonResponse({
+            'processed_batches': len(batches),
+            'batches': batches
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Error checking processed hybrid status: {e}")
+        return JsonResponse({'error': str(e)}, status=500)
 
-# HELPER FUNCTION FOR USER-SPECIFIC KEYWORD SEARCH
-
-
-def perform_user_keyword_search(query, target_user):
-    """Perform keyword search in a specific user's video library."""
-    results = []
-    user_videos = VideoJob.objects.filter(user=target_user, status=JobStatus.COMPLETED)
-
-    query_lower = query.lower()
-
-    for video in user_videos:
-        if video.transcription and "text_segments" in video.transcription:
-            for segment in video.transcription["text_segments"]:
-                text = segment.get("text", "").lower()
-                if query_lower in text:
-                    results.append(
-                        {
-                            "video_id": str(video.job_id),
-                            "title": video.video_name,
-                            "content": segment.get("text", ""),
-                            "timestamp": segment.get("start", 0),
-                            "relevance_score": 0.8,  # Basic relevance score for keyword match
-                            "search_type": "keyword",
-                        }
-                    )
-
-    # Sort by relevance (for now, just by timestamp)
-    results.sort(key=lambda x: x["relevance_score"], reverse=True)
-    return results[:20]  # Limit to top 20 results
+@extend_schema(
+    tags=['Videos'],
+    summary='Update video metadata',
+    description='Update video title and YouTube URL for a specific video.',
+    parameters=[
+        OpenApiParameter('job_id', OpenApiTypes.UUID, location=OpenApiParameter.PATH, description='Video job ID')
+    ],
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'title': {'type': 'string', 'description': 'New video title'},
+                'youtube_url': {'type': 'string', 'format': 'uri', 'description': 'YouTube URL'}
+            }
+        }
+    },
+    responses={
+        200: {'description': 'Metadata updated successfully'},
+        404: {'description': 'Video not found'}
+    }
+)
+@csrf_exempt
+def api_update_video_metadata(request, job_id):
+    """Update video metadata (title, YouTube URL) for a given job_id."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    try:
+        import json
+        data = json.loads(request.body)
+        title = data.get('title', '').strip()
+        youtube_url = data.get('youtube_url', '').strip()
+        from .models import VideoJob
+        video = VideoJob.objects.get(job_id=job_id)
+        if title:
+            video.video_name = title
+            video.title = title
+        video.youtube_url = youtube_url or None
+        video.save()
+        return JsonResponse({'success': True})
+    except VideoJob.DoesNotExist:
+        return JsonResponse({'error': 'Video not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
