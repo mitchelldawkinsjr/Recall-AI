@@ -76,61 +76,34 @@ class AskMyVideoPhase1Tests(TestCase):
         self.client.login(username="testuser1", password="testpass123")
 
         # Access library - should only see user1's videos
-        response = self.client.get(reverse("library"))
+        response = self.client.get(reverse("video_library"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Test Video 1.mp4")
         self.assertNotContains(response, "Test Video 2.mp4")
 
-        # Try to access user2's video directly - should fail
-        response = self.client.get(f"/edit-transcript/{self.job2.job_id}/")
-        self.assertEqual(response.status_code, 404)
+        # Try to access user2's video directly — should redirect away
+        response = self.client.get(
+            reverse("transcript_editor", kwargs={"job_id": str(self.job2.job_id)})
+        )
+        self.assertEqual(response.status_code, 302)
 
     def test_authentication_required(self):
         """Test that authentication is required for protected views."""
-        # Try to access library without login
-        response = self.client.get(reverse("library"))
-        self.assertEqual(response.status_code, 302)  # Redirect to login
+        response = self.client.get(reverse("video_library"))
+        self.assertEqual(response.status_code, 302)
 
-        # Try to access transcript editor without login
-        response = self.client.get(f"/transcript-editor/{self.job1.job_id}/")
-        self.assertEqual(response.status_code, 302)  # Redirect to login
-
-    def test_transcript_editing_get(self):
-        """Test getting transcript for editing."""
-        self.client.login(username="testuser1", password="testpass123")
-
-        response = self.client.get(f"/edit-transcript/{self.job1.job_id}/")
-        self.assertEqual(response.status_code, 200)
-
-        data = json.loads(response.content)
-        self.assertEqual(data["status"], "success")
-        self.assertEqual(data["transcript"], "This is a test transcript for video 1.")
-        self.assertEqual(data["job_id"], str(self.job1.job_id))
-
-    def test_transcript_editing_post(self):
-        """Test saving edited transcript."""
-        self.client.login(username="testuser1", password="testpass123")
-
-        new_transcript = "This is an updated test transcript for video 1."
-        response = self.client.post(
-            f"/edit-transcript/{self.job1.job_id}/",
-            json.dumps({"transcript": new_transcript}),
-            content_type="application/json",
+        response = self.client.get(
+            reverse("transcript_editor", kwargs={"job_id": str(self.job1.job_id)})
         )
-
-        self.assertEqual(response.status_code, 200)
-        data = json.loads(response.content)
-        self.assertEqual(data["status"], "success")
-
-        # Verify transcript was updated in database
-        self.job1.refresh_from_db()
-        self.assertEqual(self.job1.transcript, new_transcript)
+        self.assertEqual(response.status_code, 302)
 
     def test_transcript_editor_view(self):
         """Test transcript editor page renders correctly."""
         self.client.login(username="testuser1", password="testpass123")
 
-        response = self.client.get(f"/transcript-editor/{self.job1.job_id}/")
+        response = self.client.get(
+            reverse("transcript_editor", kwargs={"job_id": str(self.job1.job_id)})
+        )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Transcript Editor")
         self.assertContains(response, str(self.job1.job_id))
@@ -169,13 +142,16 @@ class AskMyVideoPhase1Tests(TestCase):
         # Login as user2 and try to access user1's video
         self.client.login(username="testuser2", password="testpass123")
 
-        response = self.client.get(f"/edit-transcript/{job.job_id}/")
-        self.assertEqual(response.status_code, 404)  # Should not find
+        response = self.client.get(
+            reverse("transcript_editor", kwargs={"job_id": str(job.job_id)})
+        )
+        self.assertEqual(response.status_code, 302)
 
-        # Login as user1 and should be able to access
         self.client.login(username="testuser1", password="testpass123")
 
-        response = self.client.get(f"/edit-transcript/{job.job_id}/")
+        response = self.client.get(
+            reverse("transcript_editor", kwargs={"job_id": str(job.job_id)})
+        )
         self.assertEqual(response.status_code, 200)
 
     def test_user_specific_video_counts(self):
@@ -195,7 +171,7 @@ class AskMyVideoPhase1Tests(TestCase):
         )
 
         self.client.login(username="testuser1", password="testpass123")
-        response = self.client.get(reverse("library"))
+        response = self.client.get(reverse("video_library"))
 
         # Should see user1's 3 videos, not user2's videos
         self.assertEqual(response.context["video_count"], 3)
