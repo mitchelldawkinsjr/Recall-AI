@@ -1,0 +1,145 @@
+# Production stack (VPS): Django + Gunicorn + Postgres + Redis + Celery worker.
+# App joins `360ws-network` so NPM can reach it by container name (recall-ai-app:8000).
+# Postgres and Redis stay on the internal network only.
+#
+# Prerequisites on the host: `docker network create 360ws-network` (already exists)
+# Deploy path: /opt/360ws/clients/docker-app/recall-ai
+# Copy deploy/env.production.example → .env next to this file, set secrets, then:
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# NPM Proxy Host: Forward to http://recall-ai-app:8000
+
+name: recall-ai
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: recall-ai-app
+    restart: unless-stopped
+    ports:
+      - "${APP_PUBLISH_PORT:-8030}:8000"
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: video_recall_project.settings.production
+      DATABASE_URL: postgresql://${DB_USERNAME:-recall}:${DB_PASSWORD}@recall-ai-postgres:5432/${DB_DATABASE:-recall_ai}
+      REDIS_URL: redis://recall-ai-redis:6379/0
+      CELERY_BROKER_URL: redis://recall-ai-redis:6379/0
+      CELERY_RESULT_BACKEND: redis://recall-ai-redis:6379/0
+      GUNICORN_WORKERS: "1"
+      GUNICORN_TIMEOUT: "300"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+      - proxy
+    volumes:
+      - media:/app/media
+      - search_cache:/app/search_cache
+      - hf_cache:/home/appuser/.cache/huggingface
+      - whisper_cache:/home/appuser/.cache/whisper
+    labels:
+      - "com.360ws.app=recall-ai"
+      - "com.360ws.type=docker-app"
+      - "com.360ws.service=app"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: recall-ai-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: video_recall_project.settings.production
+      DATABASE_URL: postgresql://${DB_USERNAME:-recall}:${DB_PASSWORD}@recall-ai-postgres:5432/${DB_DATABASE:-recall_ai}
+      REDIS_URL: redis://recall-ai-redis:6379/0
+      CELERY_BROKER_URL: redis://recall-ai-redis:6379/0
+      CELERY_RESULT_BACKEND: redis://recall-ai-redis:6379/0
+      C_FORCE_ROOT: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - internal
+    volumes:
+      - media:/app/media
+      - search_cache:/app/search_cache
+      - hf_cache:/home/appuser/.cache/huggingface
+      - whisper_cache:/home/appuser/.cache/whisper
+    labels:
+      - "com.360ws.app=recall-ai"
+      - "com.360ws.type=docker-app"
+      - "com.360ws.service=worker"
+    command: celery -A video_recall_project worker -l info -c 1 -Q default
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: recall-ai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-recall_ai}
+      POSTGRES_USER: ${DB_USERNAME:-recall}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    labels:
+      - "com.360ws.app=recall-ai"
+      - "com.360ws.type=docker-app"
+      - "com.360ws.service=postgres"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-recall} -d ${DB_DATABASE:-recall_ai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    container_name: recall-ai-redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - internal
+    volumes:
+      - redis_data:/data
+    labels:
+      - "com.360ws.app=recall-ai"
+      - "com.360ws.type=docker-app"
+      - "com.360ws.service=redis"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  internal:
+    driver: bridge
+  proxy:
+    external: true
+    name: 360ws-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  media:
+  search_cache:
+  hf_cache:
+  whisper_cache:
