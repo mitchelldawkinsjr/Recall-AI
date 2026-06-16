@@ -409,7 +409,7 @@ class Command(BaseCommand):
             if mode == "semantic":
                 results = search_engine.semantic_search(query, top_k=20)
             else:  # hybrid
-                from video_processor.views import get_video_segments_for_search
+                from video_processor.search_helpers import get_video_segments_for_search
 
                 video_segments = get_video_segments_for_search()
                 results = search_engine.hybrid_search(query, video_segments, top_k=20)
@@ -673,7 +673,7 @@ class Command(BaseCommand):
             self.stdout.write("=" * 60)
 
             # Get regular search results first
-            from video_processor.views import (
+            from video_processor.search_helpers import (
                 convert_semantic_results_to_display_format,
                 perform_keyword_search,
             )
@@ -857,3 +857,4 @@ Examples:
   python manage.py video_manager delete abc123
         """
         )
+ 

@@ -1,62 +1,17 @@
-# AskMyVideo Web Application
-# Full-stack video processing and AI search platform
-version: '3.8'
-
+# AskMyVideo — local development compose (web only)
 services:
-  # VaultIQ Web Application
   web:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - .:/app
+      - ./media:/app/media
     ports:
       - "8000:8000"
-    volumes:
-      - ./media:/app/media
-      - ./uploads:/app/uploads  
-      - ./search_cache:/app/search_cache
-      - ./db.sqlite3:/app/db.sqlite3
     environment:
       - DEBUG=1
-      - DJANGO_SECRET_KEY=your-secret-key-here
-    depends_on:
-      - redis
-    restart: unless-stopped
-
-  # Redis for caching and task queue
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-
-  # Celery worker for background tasks
-  celery:
-    build: .
-    command: celery -A video_recall_project worker --loglevel=info
-    volumes:
-      - ./media:/app/media
-      - ./uploads:/app/uploads
-      - ./search_cache:/app/search_cache
-      - ./db.sqlite3:/app/db.sqlite3
-    environment:
-      - DEBUG=1
-      - DJANGO_SECRET_KEY=your-secret-key-here
-    depends_on:
-      - redis
-    restart: unless-stopped
-
-  # Nginx reverse proxy
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./static:/var/www/static:ro
-      - ./media:/var/www/media:ro
-    depends_on:
-      - web
-    restart: unless-stopped
-
-volumes:
-  redis_data: 
+      - DJANGO_SETTINGS_MODULE=video_recall_project.settings
+      - SECRET_KEY=dev-compose-secret
+      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0

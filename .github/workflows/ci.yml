@@ -11,17 +11,6 @@ jobs:
     name: Django Tests
     runs-on: ubuntu-latest
 
-    services:
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
       - uses: actions/checkout@v4
 
@@ -51,7 +40,6 @@ jobs:
           DJANGO_SETTINGS_MODULE: video_recall_project.settings
           SECRET_KEY: ci-test-secret-key-not-for-production
           DEBUG: "True"
-          REDIS_URL: redis://localhost:6379/0
         run: python manage.py test video_processor --verbosity=2
 
       - name: Django deployment check

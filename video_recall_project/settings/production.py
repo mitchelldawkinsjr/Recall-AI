@@ -51,52 +51,14 @@ else:
         }
     }
 
-# Redis/Cache - Make optional with fallback to dummy cache
-REDIS_URL = os.environ.get('REDIS_URL')
-if REDIS_URL:
-    try:
-        CACHES = {
-            'default': {
-                'BACKEND': 'django_redis.cache.RedisCache',
-                'LOCATION': REDIS_URL,
-                'OPTIONS': {
-                    'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-                }
-            }
-        }
-    except Exception:
-        # Fallback to dummy cache if Redis unavailable
-        CACHES = {
-            'default': {
-                'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
-            }
-        }
-else:
-    # Use dummy cache if no Redis URL provided
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
-        }
+# Cache — dummy unless REDIS_URL is set and django-redis is installed
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
     }
-
-# Celery Configuration - Make optional
-REDIS_URL = os.environ.get('REDIS_URL')
-if REDIS_URL:
-    try:
-        CELERY_BROKER_URL = REDIS_URL
-        CELERY_RESULT_BACKEND = REDIS_URL
-        CELERY_ACCEPT_CONTENT = ['json']
-        CELERY_TASK_SERIALIZER = 'json'
-        CELERY_RESULT_SERIALIZER = 'json'
-        CELERY_TIMEZONE = 'UTC'
-    except Exception:
-        # Disable Celery if Redis unavailable
-        CELERY_BROKER_URL = None
-        CELERY_RESULT_BACKEND = None
-else:
-    # Disable Celery if no Redis URL provided
-    CELERY_BROKER_URL = None
-    CELERY_RESULT_BACKEND = None
+}
+CELERY_BROKER_URL = None
+CELERY_RESULT_BACKEND = None
 
 # AWS S3 Storage (Optional)
 if os.environ.get('USE_S3', 'False').lower() == 'true':
@@ -232,11 +194,6 @@ LOGGING = {
             'level': LOG_LEVEL,
             'propagate': False,
         },
-        'celery': {
-            'handlers': ['console', 'error_console'],
-            'level': LOG_LEVEL,
-            'propagate': False,
-        },
     },
 }
 
@@ -269,13 +226,11 @@ DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'noreply@yourdomain.co
 if os.environ.get('SENTRY_DSN'):
     import sentry_sdk
     from sentry_sdk.integrations.django import DjangoIntegration
-    from sentry_sdk.integrations.celery import CeleryIntegration
     
     sentry_sdk.init(
         dsn=os.environ.get('SENTRY_DSN'),
         integrations=[
             DjangoIntegration(),
-            CeleryIntegration(),
         ],
         traces_sample_rate=0.1,
         send_default_pii=True

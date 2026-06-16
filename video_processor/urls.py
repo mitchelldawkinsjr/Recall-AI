@@ -21,10 +21,6 @@ urlpatterns = [
     path("api/advanced-search/", views.api_advanced_search, name="api_advanced_search"),
     path("api/rag-qa/", views.api_rag_qa, name="api_rag_qa"),
     
-    # Teams API endpoints (for frontend compatibility)
-    path("api/teams/summary/", views.api_teams_summary, name="api_teams_summary"),
-    path("api/teams/", views.api_teams_list, name="api_teams_list"),
-    
     # Health Check for load balancers
     path("health/", views.health_check, name="health_check"),
     path("api/health/", views.api_health_check, name="api_health_check"),
@@ -39,11 +35,6 @@ urlpatterns = [
     path("api/process-job/", views.api_process_job, name="api_process_job"),
     path("api/video/<str:job_id>/", views.api_video_details, name="api_video_details"),
     path('api/video/<uuid:job_id>/update-metadata/', views.api_update_video_metadata, name='api_update_video_metadata'),
-    
-    # Hybrid processing endpoints
-    path("api/hybrid/status/", views.api_hybrid_status, name="api_hybrid_status"),
-    path("api/hybrid/processed/", views.api_hybrid_processed_status, name="api_hybrid_processed_status"),
-    path("api/hybrid/process/", views.process_hybrid_batch, name="process_hybrid_batch"),
     
     # Authentication
     path("accounts/", include("django.contrib.auth.urls")),

@@ -200,8 +200,7 @@ class DockerConfigTests(TestCase):
 
         # Check for key production dependencies
         self.assertIn("gunicorn", requirements)
-        self.assertIn("celery", requirements)
-        self.assertIn("redis", requirements)
+        self.assertIn("djangorestframework", requirements)
         self.assertIn("Django", requirements)
 
 

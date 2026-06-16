@@ -18,8 +18,6 @@ THIRD_PARTY_APPS = [
     'corsheaders',
     'rest_framework',
     'drf_spectacular',
-    'django_celery_beat',
-    'django_celery_results',
 ]
 
 LOCAL_APPS = [
@@ -113,8 +111,6 @@ SPECTACULAR_SETTINGS = {
         {'name': 'Videos', 'description': 'Video management endpoints'},
         {'name': 'Admin', 'description': 'Administrative endpoints'},
         {'name': 'Health', 'description': 'Health check endpoints'},
-        {'name': 'Teams', 'description': 'Team management endpoints'},
-        {'name': 'Hybrid', 'description': 'Hybrid processing endpoints'},
     ],
 }
 
@@ -200,44 +196,11 @@ CORS_ALLOW_METHODS = [
     'PUT',
 ]
 
-# Celery Configuration - Optional, can be overridden in production
-CELERY_TIMEZONE = 'UTC'
-CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
-CELERY_ACCEPT_CONTENT = ['application/json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-
-# Redis/Cache - Optional, defaults to dummy cache if not configured
-REDIS_URL = os.environ.get('REDIS_URL')
-if REDIS_URL:
-    try:
-        CACHES = {
-            'default': {
-                'BACKEND': 'django_redis.cache.RedisCache',
-                'LOCATION': REDIS_URL,
-                'OPTIONS': {
-                    'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-                }
-            }
-        }
-        CELERY_BROKER_URL = REDIS_URL
-        CELERY_RESULT_BACKEND = REDIS_URL
-    except Exception:
-        # Fallback to dummy cache if Redis unavailable
-        CACHES = {
-            'default': {
-                'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
-            }
-        }
-        CELERY_BROKER_URL = None
-        CELERY_RESULT_BACKEND = None
-else:
-    # Use dummy cache if no Redis URL provided
-    CACHES = {
-        'default': {
-            'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
-        }
+# Celery — optional; configure via REDIS_URL when background tasks are added
+CELERY_BROKER_URL = None
+CELERY_RESULT_BACKEND = None
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
     }
-    CELERY_BROKER_URL = None
-    CELERY_RESULT_BACKEND = None 
+} 

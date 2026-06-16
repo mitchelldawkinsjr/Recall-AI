@@ -6,21 +6,14 @@ Pillow==10.0.0
 gunicorn==21.2.0
 whitenoise[brotli]==6.7.0
 
-# Database & cache
+# Database
 dj-database-url==2.1.0
 psycopg2-binary==2.9.7
-django-redis==5.3.0
-redis==4.6.0
 
-# API
+# API + OpenAPI docs
 django-cors-headers==4.2.0
 djangorestframework==3.14.0
 drf-spectacular==0.27.0
-
-# Task queue (settings wired; tasks optional)
-celery==5.3.0
-django-celery-beat==2.5.0
-django-celery-results==2.5.1
 
 # Video processing
 opencv-python-headless>=4.8.0
