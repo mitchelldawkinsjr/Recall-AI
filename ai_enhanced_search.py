@@ -520,3 +520,4 @@ async def enhance_search_with_ai(
             )
             for r in search_results
         ]
+ 

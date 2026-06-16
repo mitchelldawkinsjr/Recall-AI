@@ -81,6 +81,9 @@ class EnhancedSemanticSearchEngine:
             f"Enhanced semantic search engine initialized with model: {model_name}"
         )
 
+        # Try to load existing index automatically
+        self._load_index()
+
     @property
     def is_available(self) -> bool:
         """Check if search engine dependencies are available."""
@@ -291,15 +294,19 @@ class EnhancedSemanticSearchEngine:
         k: int = 10,
         min_similarity: float = 0.3,
         filter_topics: Optional[List[str]] = None,
+        diversify_results: bool = True,
+        max_results_per_video: int = 3,
     ) -> List[EnhancedSearchResult]:
         """
-        Enhanced semantic search with filtering and ranking.
+        Enhanced semantic search with filtering, ranking, and result diversification.
 
         Args:
             query: Search query
             k: Number of results to return
             min_similarity: Minimum similarity threshold
             filter_topics: Optional topic filters
+            diversify_results: Whether to diversify results across videos
+            max_results_per_video: Maximum results per video when diversifying
 
         Returns:
             List of enhanced search results
@@ -315,14 +322,16 @@ class EnhancedSemanticSearchEngine:
             query_embedding = self.model.encode([query], convert_to_numpy=True)
             faiss.normalize_L2(query_embedding)
 
-            # Search index
+            # Search index - get more results for filtering and diversification
+            search_k = min(k * 3, len(self.segments)) if diversify_results else min(k * 2, len(self.segments))
             similarities, indices = self.index.search(
                 query_embedding.astype("float32"),
-                min(k * 2, len(self.segments)),  # Get more results for filtering
+                search_k,
             )
 
-            results = []
-            for i, (similarity, idx) in enumerate(zip(similarities[0], indices[0])):
+            # Collect all valid results
+            all_results = []
+            for similarity, idx in zip(similarities[0], indices[0]):
                 if similarity < min_similarity:
                     continue
 
@@ -347,10 +356,14 @@ class EnhancedSemanticSearchEngine:
                     topic_tags=segment.get("topics", []),
                 )
 
-                results.append(result)
+                all_results.append(result)
 
-                if len(results) >= k:
-                    break
+            # Apply result diversification if requested
+            if diversify_results and len(all_results) > k:
+                results = self._diversify_results(all_results, k, max_results_per_video)
+            else:
+                # Take top k results
+                results = all_results[:k]
 
             # Update statistics
             search_time = time.time() - start_time
@@ -368,6 +381,79 @@ class EnhancedSemanticSearchEngine:
         except Exception as e:
             logger.error(f"Enhanced search failed: {e}")
             return []
+
+    def _diversify_results(
+        self, 
+        all_results: List[EnhancedSearchResult], 
+        k: int, 
+        max_results_per_video: int
+    ) -> List[EnhancedSearchResult]:
+        """
+        Diversify search results to ensure good distribution across videos.
+        
+        Args:
+            all_results: All search results sorted by relevance
+            k: Number of results to return
+            max_results_per_video: Maximum results per video
+            
+        Returns:
+            Diversified list of results
+        """
+        if not all_results:
+            return []
+            
+        # Group results by video
+        video_groups = {}
+        for result in all_results:
+            video_id = result.video_id
+            if video_id not in video_groups:
+                video_groups[video_id] = []
+            video_groups[video_id].append(result)
+        
+        # Sort each video's results by confidence score
+        for video_id in video_groups:
+            video_groups[video_id].sort(key=lambda x: x.confidence_score, reverse=True)
+        
+        # Diversified selection algorithm
+        diversified_results = []
+        selected_videos = set()
+        
+        # First pass: take top result from each video
+        for video_id, results in video_groups.items():
+            if len(diversified_results) >= k:
+                break
+            diversified_results.append(results[0])
+            selected_videos.add(video_id)
+        
+        # Second pass: add more results from videos that have high-quality matches
+        # Sort videos by their best result's confidence score
+        video_quality = {}
+        for video_id, results in video_groups.items():
+            if results:
+                video_quality[video_id] = results[0].confidence_score
+        
+        # Sort videos by quality (best first)
+        sorted_videos = sorted(video_quality.items(), key=lambda x: x[1], reverse=True)
+        
+        # Add additional results from high-quality videos
+        for video_id, _ in sorted_videos:
+            if len(diversified_results) >= k:
+                break
+                
+            results = video_groups[video_id]
+            current_count = sum(1 for r in diversified_results if r.video_id == video_id)
+            
+            # Add more results from this video if we haven't reached the limit
+            for i in range(1, min(max_results_per_video, len(results))):
+                if current_count >= max_results_per_video or len(diversified_results) >= k:
+                    break
+                diversified_results.append(results[i])
+                current_count += 1
+        
+        # Sort final results by confidence score
+        diversified_results.sort(key=lambda x: x.confidence_score, reverse=True)
+        
+        return diversified_results[:k]
 
     def get_semantic_similar_segments(
         self, segment_text: str, k: int = 5

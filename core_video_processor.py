@@ -36,12 +36,18 @@ except ImportError:
     logger.warning("OpenCV not available - video frame analysis will be limited")
 
 try:
-    import whisper
+    import whisper_compat as whisper  # faster-whisper shim (4x faster on CPU, no legacy build issues)
 
     WHISPER_AVAILABLE = True
-    logger.info("Whisper successfully imported")
+    logger.info("Whisper (faster-whisper via compat shim) successfully imported")
 except ImportError:
-    WHISPER_AVAILABLE = False
+    try:
+        import whisper  # fallback to openai-whisper if available
+
+        WHISPER_AVAILABLE = True
+        logger.info("Whisper (openai-whisper) successfully imported")
+    except ImportError:
+        WHISPER_AVAILABLE = False
     logger.warning("Whisper not available - transcription will be disabled")
 
 

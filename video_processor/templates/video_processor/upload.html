@@ -1,0 +1,118 @@
+{% extends "video_processor/base.html" %}
+
+{% block title %}Recall AI | Upload Videos{% endblock %}
+
+{% block body_theme %}theme-surface bg-background{% endblock %}
+
+{% block content %}
+<div class="mb-lg">
+    <h2 class="text-headline-lg text-primary mb-xs">Upload Experience</h2>
+    <p class="text-on-surface-variant text-body-md">Ingest your video content for intelligent indexing and semantic search.</p>
+</div>
+
+<section class="bg-surface-container-lowest rounded-xl border border-outline-variant/10 shadow-sm overflow-hidden mb-xl">
+    <div class="flex border-b border-outline-variant/20 px-md pt-base overflow-x-auto">
+        <button type="button" class="tab-btn relative px-md py-sm text-label-lg text-primary flex items-center gap-xs" data-tab="local">
+            <span class="material-symbols-outlined text-[20px]">upload_file</span> Local File
+        </button>
+        <button type="button" class="tab-btn relative px-md py-sm text-label-lg text-on-surface-variant flex items-center gap-xs" data-tab="yt-url">
+            <span class="material-symbols-outlined text-[20px]">link</span> YouTube URL
+        </button>
+        <button type="button" class="tab-btn relative px-md py-sm text-label-lg text-on-surface-variant flex items-center gap-xs" data-tab="yt-playlist">
+            <span class="material-symbols-outlined text-[20px]">playlist_play</span> YouTube Playlist
+        </button>
+    </div>
+
+    <div id="tab-local" class="tab-panel p-lg">
+        <form method="post" action="{% url 'upload_video' %}" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="upload-dashed-border rounded-xl p-xl flex flex-col items-center justify-center bg-surface-container-low/30 hover:bg-surface-container-low transition-all cursor-pointer min-h-64">
+                <div class="w-16 h-16 bg-primary-container/10 rounded-full flex items-center justify-center mb-md">
+                    <span class="material-symbols-outlined text-primary text-[32px]">cloud_upload</span>
+                </div>
+                <p class="text-headline-md text-primary mb-xs">Drag & drop video files</p>
+                <p class="text-on-surface-variant text-body-md mb-lg">MP4, MOV, AVI and more</p>
+                <input type="file" name="video" accept="video/*" required
+                       class="mb-md text-body-sm file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-primary file:text-on-primary file:font-bold">
+                <button type="submit" class="bg-primary text-on-primary px-xl py-sm rounded-lg font-label-lg hover:opacity-90 transition-opacity shadow-md">
+                    Upload & Process
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <div id="tab-yt-url" class="tab-panel hidden p-lg">
+        <form method="post" action="{% url 'upload_video' %}" class="flex flex-col gap-md max-w-2xl mx-auto py-lg">
+            {% csrf_token %}
+            <div class="flex flex-col gap-xs">
+                <label class="text-label-lg text-primary">Video URL</label>
+                <input name="youtube_url" type="url" required placeholder="https://youtube.com/watch?v=..."
+                       class="w-full px-md py-3 rounded-lg border border-outline-variant bg-surface-container-low focus:border-primary outline-none">
+            </div>
+            <button type="submit" class="bg-primary text-on-primary w-fit px-xl py-sm rounded-lg font-label-lg hover:opacity-90 shadow-md">
+                Fetch Video
+            </button>
+        </form>
+    </div>
+
+    <div id="tab-yt-playlist" class="tab-panel hidden p-lg">
+        <form method="post" action="{% url 'upload_video' %}" class="flex flex-col gap-md max-w-2xl mx-auto py-lg">
+            {% csrf_token %}
+            <div class="flex flex-col gap-xs">
+                <label class="text-label-lg text-primary">Playlist URL</label>
+                <input name="playlist_url" type="url" required placeholder="https://youtube.com/playlist?list=..."
+                       class="w-full px-md py-3 rounded-lg border border-outline-variant bg-surface-container-low focus:border-primary outline-none">
+            </div>
+            <button type="submit" class="bg-primary text-on-primary w-fit px-xl py-sm rounded-lg font-label-lg hover:opacity-90 shadow-md">
+                Fetch Playlist
+            </button>
+        </form>
+    </div>
+</section>
+
+{% if recent_videos %}
+<section>
+    <h3 class="text-headline-md text-primary mb-md">Recent Uploads</h3>
+    <div class="bg-surface-container-lowest rounded-xl border border-outline-variant/10 overflow-hidden">
+        <table class="w-full text-left">
+            <thead>
+                <tr class="bg-surface-container-low border-b border-outline-variant/20">
+                    <th class="px-md py-sm text-label-lg text-on-surface-variant">Video</th>
+                    <th class="px-md py-sm text-label-lg text-on-surface-variant">Status</th>
+                    <th class="px-md py-sm text-label-lg text-on-surface-variant">Date</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-outline-variant/10">
+                {% for video in recent_videos %}
+                <tr class="hover:bg-surface-container-low/30">
+                    <td class="px-md py-md text-label-lg text-primary">{{ video.video_name|truncatechars:50 }}</td>
+                    <td class="px-md py-md">
+                        {% include "video_processor/includes/status_badge.html" with status=video.status label=video.get_status_display %}
+                    </td>
+                    <td class="px-md py-md text-body-sm text-on-surface-variant">{{ video.created_at|date:"M d, Y" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const tab = btn.dataset.tab;
+        document.querySelectorAll('.tab-btn').forEach(b => {
+            b.classList.remove('text-primary');
+            b.classList.add('text-on-surface-variant');
+        });
+        btn.classList.add('text-primary');
+        btn.classList.remove('text-on-surface-variant');
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+        document.getElementById('tab-' + tab).classList.remove('hidden');
+    });
+});
+</script>
+{% endblock %}
