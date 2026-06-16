@@ -1,0 +1,48 @@
+{
+  "label": "after",
+  "generatedAt": "2026-06-16T19:00:56.118Z",
+  "baseUrl": "http://127.0.0.1:8000",
+  "tool": "@axe-core/playwright",
+  "tags": [
+    "wcag2a",
+    "wcag2aa",
+    "wcag21a",
+    "wcag21aa",
+    "wcag22aa",
+    "best-practice"
+  ],
+  "totalPages": 4,
+  "totalViolations": 0,
+  "totalNodeViolations": 0,
+  "issues": [],
+  "pages": [
+    {
+      "name": "home",
+      "url": "http://127.0.0.1:8000/",
+      "violationCount": 0,
+      "reportJson": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-home.json",
+      "reportMd": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-home.md"
+    },
+    {
+      "name": "public_enhanced",
+      "url": "http://127.0.0.1:8000/public/enhanced/",
+      "violationCount": 0,
+      "reportJson": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-public_enhanced.json",
+      "reportMd": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-public_enhanced.md"
+    },
+    {
+      "name": "login",
+      "url": "http://127.0.0.1:8000/accounts/login/",
+      "violationCount": 0,
+      "reportJson": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-login.json",
+      "reportMd": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-login.md"
+    },
+    {
+      "name": "register",
+      "url": "http://127.0.0.1:8000/accounts/register/",
+      "violationCount": 0,
+      "reportJson": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-register.json",
+      "reportMd": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-register.md"
+    }
+  ]
+}

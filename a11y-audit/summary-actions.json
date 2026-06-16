@@ -1,0 +1,80 @@
+{
+  "auditAgent": "accessibility-audit-remediation",
+  "timestamp": "2026-06-16T19:05:00.000Z",
+  "targetUrl": "http://127.0.0.1:8000",
+  "toolRequested": "DietrichGebert/ponytail",
+  "toolUsed": "@axe-core/playwright (axe-core 4.11.4)",
+  "toolNote": "Ponytail is a coding-style ruleset, not an a11y scanner. axe-core used as WCAG-equivalent substitute.",
+  "standards": ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"],
+  "pagesAudited": ["home", "public_enhanced", "login", "register"],
+  "before": {
+    "totalViolations": 7,
+    "totalNodeViolations": 10,
+    "uniqueIssues": 5,
+    "summaryPath": "a11y-audit/summary-before.json"
+  },
+  "after": {
+    "totalViolations": 0,
+    "totalNodeViolations": 0,
+    "uniqueIssues": 0,
+    "summaryPath": "a11y-audit/summary-after.json"
+  },
+  "issuesResolved": [
+    {
+      "id": "label",
+      "severity": "critical",
+      "before": 4,
+      "after": 0,
+      "files": ["video_processor/templates/video_processor/enhanced_search.html"]
+    },
+    {
+      "id": "color-contrast",
+      "severity": "high",
+      "before": 2,
+      "after": 0,
+      "files": ["video_processor/templates/video_processor/includes/sidebar.html"]
+    },
+    {
+      "id": "region",
+      "severity": "medium",
+      "before": 2,
+      "after": 0,
+      "files": ["video_processor/templates/video_processor/auth_base.html"]
+    },
+    {
+      "id": "landmark-unique",
+      "severity": "medium",
+      "before": 1,
+      "after": 0,
+      "files": [
+        "video_processor/templates/video_processor/includes/sidebar.html",
+        "video_processor/templates/video_processor/enhanced_search.html"
+      ]
+    },
+    {
+      "id": "page-has-heading-one",
+      "severity": "medium",
+      "before": 1,
+      "after": 0,
+      "files": [
+        "video_processor/templates/video_processor/public_enhanced_search.html",
+        "video_processor/templates/video_processor/enhanced_search.html"
+      ]
+    }
+  ],
+  "tests": {
+    "framework": "@playwright/test",
+    "file": "a11y-audit/a11y.spec.mjs",
+    "result": "4 passed, 0 failed"
+  },
+  "ci": {
+    "workflow": ".github/workflows/a11y-audit.yml",
+    "trigger": "pull_request on templates/static/a11y-audit paths"
+  },
+  "verification": {
+    "reAuditPassed": true,
+    "playwrightTestsPassed": true,
+    "regressions": 0
+  },
+  "reportPath": "a11y-audit/FINAL_REPORT.md"
+}

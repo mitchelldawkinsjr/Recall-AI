@@ -1,0 +1,156 @@
+{
+  "label": "before",
+  "generatedAt": "2026-06-16T19:00:08.159Z",
+  "baseUrl": "http://127.0.0.1:8000",
+  "tool": "@axe-core/playwright",
+  "tags": [
+    "wcag2a",
+    "wcag2aa",
+    "wcag21a",
+    "wcag21aa",
+    "wcag22aa",
+    "best-practice"
+  ],
+  "totalPages": 4,
+  "totalViolations": 7,
+  "totalNodeViolations": 10,
+  "issues": [
+    {
+      "id": "label",
+      "type": "label",
+      "severity": "critical",
+      "impact": "critical",
+      "description": "Ensure every form element has a label",
+      "help": "Form elements must have labels",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/label?application=playwright",
+      "tags": [
+        "cat.forms",
+        "wcag2a",
+        "wcag412",
+        "section508",
+        "section508.22.n",
+        "TTv5",
+        "TT5.c",
+        "EN-301-549",
+        "EN-9.4.1.2",
+        "ACT",
+        "RGAAv4",
+        "RGAA-11.1.1"
+      ],
+      "pages": [
+        "public_enhanced"
+      ],
+      "occurrences": 4
+    },
+    {
+      "id": "color-contrast",
+      "type": "color-contrast",
+      "severity": "high",
+      "impact": "serious",
+      "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+      "help": "Elements must meet minimum color contrast ratio thresholds",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/color-contrast?application=playwright",
+      "tags": [
+        "cat.color",
+        "wcag2aa",
+        "wcag143",
+        "TTv5",
+        "TT13.c",
+        "EN-301-549",
+        "EN-9.1.4.3",
+        "ACT",
+        "RGAAv4",
+        "RGAA-3.2.1"
+      ],
+      "pages": [
+        "home",
+        "public_enhanced"
+      ],
+      "occurrences": 2
+    },
+    {
+      "id": "region",
+      "type": "region",
+      "severity": "medium",
+      "impact": "moderate",
+      "description": "Ensure all page content is contained by landmarks",
+      "help": "All page content should be contained by landmarks",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/region?application=playwright",
+      "tags": [
+        "cat.keyboard",
+        "best-practice",
+        "RGAAv4",
+        "RGAA-9.2.1"
+      ],
+      "pages": [
+        "login",
+        "register"
+      ],
+      "occurrences": 2
+    },
+    {
+      "id": "landmark-unique",
+      "type": "landmark-unique",
+      "severity": "medium",
+      "impact": "moderate",
+      "description": "Ensure landmarks are unique",
+      "help": "Landmarks should have a unique role or role/label/title (i.e. accessible name) combination",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/landmark-unique?application=playwright",
+      "tags": [
+        "cat.semantics",
+        "best-practice"
+      ],
+      "pages": [
+        "public_enhanced"
+      ],
+      "occurrences": 1
+    },
+    {
+      "id": "page-has-heading-one",
+      "type": "page-has-heading-one",
+      "severity": "medium",
+      "impact": "moderate",
+      "description": "Ensure that the page, or at least one of its frames contains a level-one heading",
+      "help": "Page should contain a level-one heading",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/page-has-heading-one?application=playwright",
+      "tags": [
+        "cat.semantics",
+        "best-practice"
+      ],
+      "pages": [
+        "public_enhanced"
+      ],
+      "occurrences": 1
+    }
+  ],
+  "pages": [
+    {
+      "name": "home",
+      "url": "http://127.0.0.1:8000/",
+      "violationCount": 1,
+      "reportJson": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-home.json",
+      "reportMd": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-home.md"
+    },
+    {
+      "name": "public_enhanced",
+      "url": "http://127.0.0.1:8000/public/enhanced/",
+      "violationCount": 4,
+      "reportJson": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-public_enhanced.json",
+      "reportMd": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-public_enhanced.md"
+    },
+    {
+      "name": "login",
+      "url": "http://127.0.0.1:8000/accounts/login/",
+      "violationCount": 1,
+      "reportJson": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-login.json",
+      "reportMd": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-login.md"
+    },
+    {
+      "name": "register",
+      "url": "http://127.0.0.1:8000/accounts/register/",
+      "violationCount": 1,
+      "reportJson": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-register.json",
+      "reportMd": "/Users/mitchelldawkins/Projects/recall_ai_from_ec2/video-processor-mvp/a11y-audit/report-register.md"
+    }
+  ]
+}
