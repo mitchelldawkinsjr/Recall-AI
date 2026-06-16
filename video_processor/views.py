@@ -48,30 +48,12 @@ except ImportError as e:
     search_engine = None
     SemanticSearchEngine = None
 
-# Import AI enhancement system
-try:
-    from ai_enhanced_search import (
-        create_ai_config,
-        enhance_search_with_ai,
-        get_ai_engine,
-    )
-    AI_AVAILABLE = True
-    logger.info("AI enhanced search components imported successfully")
-except ImportError as e:
-    logger.warning(f"AI enhanced search not available: {e}")
-    AI_AVAILABLE = False
-    create_ai_config = None
-    enhance_search_with_ai = None
-    get_ai_engine = None
-
-# Phase 2: Import enhanced AI components
+# Phase 2: enhanced search + RAG (whisper pipeline removed — core path uses core_video_processor)
 try:
     from enhanced_semantic_search import get_enhanced_search_engine
-    from enhanced_whisper_pipeline import get_enhanced_whisper
     from rag_qa_system import get_rag_qa_system
 
     enhanced_search = get_enhanced_search_engine()
-    enhanced_whisper = get_enhanced_whisper()
     rag_qa = get_rag_qa_system()
 
     PHASE2_AI_AVAILABLE = True
@@ -80,7 +62,6 @@ try:
 except ImportError as e:
     logger.warning(f"Phase 2 AI components not available: {e}")
     enhanced_search = None
-    enhanced_whisper = None
     rag_qa = None
     PHASE2_AI_AVAILABLE = False
 
@@ -457,9 +438,35 @@ def convert_keyword_results_to_api_format(keyword_results):
     return api_results
 
 
-@csrf_exempt
+def resolve_target_user(username):
+    """Resolve a username to a User, or None if not filtering."""
+    if not username:
+        return None
+    try:
+        return User.objects.get(username=username)
+    except User.DoesNotExist:
+        return False
+
+
+def filter_api_results_by_user(results, user):
+    """Keep only results belonging to the given user's videos."""
+    if not user:
+        return results
+    user_job_ids = {
+        str(job_id)
+        for job_id in VideoJob.objects.filter(user=user).values_list("job_id", flat=True)
+    }
+    return [r for r in results if str(r.get("video_id")) in user_job_ids]
+
+
+@login_required
 def upload_video(request):
     """Handle video upload and processing (files, YouTube URLs, or YouTube playlists)."""
+    if request.method == "GET":
+        return render(request, "video_processor/upload.html", {
+            "recent_videos": VideoJob.objects.filter(user=request.user).order_by("-created_at")[:10],
+        })
+
     if request.method != "POST":
         return redirect("video_library")
 
@@ -666,13 +673,33 @@ def transcript_editor(request, job_id):
     try:
         video = VideoJob.objects.get(job_id=job_id, user=request.user)
     except VideoJob.DoesNotExist:
+        if request.method != "GET" or request.headers.get("Content-Type") == "application/json":
+            return JsonResponse({"status": "error", "message": "Video not found or access denied."}, status=404)
         messages.error(request, "Video not found or access denied.")
         return redirect("video_library")
-    
+
     if video.status != JobStatus.COMPLETED:
+        if request.method != "GET" or request.headers.get("Content-Type") == "application/json":
+            return JsonResponse({"status": "error", "message": "Video processing not completed yet."}, status=400)
         messages.error(request, "Video processing not completed yet.")
         return redirect("video_library")
-    
+
+    if request.method == "GET" and request.GET.get("format") == "json":
+        return JsonResponse({"status": "success", "transcript": video.transcription_text})
+
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            transcript = data.get("transcript", "")
+            if video.transcription:
+                video.transcription = {**video.transcription, "text": transcript, "word_count": len(transcript.split())}
+            else:
+                video.transcription = {"text": transcript, "word_count": len(transcript.split())}
+            video.save()
+            return JsonResponse({"status": "success"})
+        except (json.JSONDecodeError, TypeError) as e:
+            return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
     return render(request, "video_processor/transcript_editor.html", {
         "video": video,
     })
@@ -1367,10 +1394,15 @@ def api_search(request):
     try:
         data = json.loads(request.body)
         query = data.get("query", "").strip()
-        search_mode = data.get("search_mode", "hybrid")  # keyword, semantic, hybrid
+        search_mode = data.get("search_mode", data.get("mode", "hybrid"))
+        username = data.get("username", "").strip()
 
         if not query:
             return JsonResponse({"error": "Query is required"}, status=400)
+
+        target_user = resolve_target_user(username)
+        if target_user is False:
+            return JsonResponse({"error": "User not found"}, status=404)
 
         # Track search query
         VideoSearchQuery.objects.create(query=query, results_count=0)
@@ -1403,6 +1435,8 @@ def api_search(request):
             keyword_results = perform_keyword_search(query)
             search_results = convert_keyword_results_to_api_format(keyword_results)
 
+        search_results = filter_api_results_by_user(search_results, target_user)
+
         # Update search query results count
         VideoSearchQuery.objects.filter(query=query).update(
             results_count=len(search_results)
@@ -1413,7 +1447,9 @@ def api_search(request):
             "results": search_results,
             "query": query,
             "search_mode": search_mode,
-            "total_results": len(search_results)
+            "mode": search_mode,
+            "total_results": len(search_results),
+            "count": len(search_results),
         })
 
     except json.JSONDecodeError:
@@ -1947,6 +1983,11 @@ def api_advanced_search(request):
     try:
         data = json.loads(request.body)
         query = data.get("query", "").strip()
+        username = data.get("username", "").strip()
+
+        target_user = resolve_target_user(username)
+        if target_user is False:
+            return JsonResponse({"error": "User not found"}, status=404)
         
         # Advanced search parameters
         k = data.get("k", 25)
@@ -2051,6 +2092,8 @@ def api_advanced_search(request):
             keyword_results = perform_keyword_search(query)
             search_results = convert_keyword_results_to_api_format(keyword_results)
             search_mode = "keyword_fallback"
+
+        search_results = filter_api_results_by_user(search_results, target_user)
 
         # Calculate statistics
         video_count = len(set(result.get("video_id") for result in search_results))

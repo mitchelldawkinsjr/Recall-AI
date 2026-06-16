@@ -1,0 +1,1331 @@
+    <script>
+        let currentVideoModal = null;
+
+        function playSegment(jobId, timestamp) {
+            // Fetch video details to check if it's a YouTube video
+            fetch(`/api/video/${jobId}/`)
+                .then(response => response.json())
+                .then(data => {
+                    const modal = document.getElementById('videoModal');
+                    const modalTitle = document.getElementById('modalTitle');
+                    const modalBody = document.getElementById('modalBody');
+                    
+                    modalTitle.textContent = `Video Player - ${timestamp.toFixed(1)}s`;
+                    
+                    let playerHtml;
+                    if (data.is_youtube && data.youtube_video_id) {
+                        // YouTube player
+                        const youtubeStartTime = Math.floor(timestamp);
+                        playerHtml = `
+                            <div style="max-width: 800px; width: 100%;">
+                                <div id="youtubePlayerContainer" style="position: relative; width: 100%; height: 450px; border-radius: 8px; overflow: hidden; background: #000;">
+                                    <iframe id="youtubePlayer" width="100%" height="450" 
+                                            src="https://www.youtube.com/embed/${data.youtube_video_id}?start=${youtubeStartTime}&autoplay=1&enablejsapi=1" 
+                                            frameborder="0" 
+                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                            allowfullscreen>
+                                    </iframe>
+                                </div>
+                                <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                        <strong>⏰ Current Timestamp: ${timestamp.toFixed(1)}s</strong>
+                                        <div>
+                                            <button class="btn btn-info btn-small" onclick="copyTimestamp(${timestamp})">📋 Copy Timestamp</button>
+                                            <button class="btn btn-primary btn-small" onclick="shareSegment('${jobId}', ${timestamp})">🔗 Share Segment</button>
+                                            <a href="${data.youtube_url}" target="_blank" class="btn btn-warning btn-small">🎥 Open on YouTube</a>
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        <button class="btn btn-success btn-small" onclick="seekYouTubeToTimestamp(${timestamp})">⏭️ Jump to Timestamp</button>
+                                        <button class="btn btn-info btn-small" onclick="seekYouTubeRelative(-10)">⏪ -10s</button>
+                                        <button class="btn btn-info btn-small" onclick="seekYouTubeRelative(10)">⏩ +10s</button>
+                                        <span style="font-weight: bold;">YouTube Player</span>
+                                    </div>
+                                    <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
+                                        <strong>Note:</strong> Video file was cleaned up to save storage. Playing from YouTube directly.
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        // Local video player
+                        playerHtml = `
+                            <div style="max-width: 800px; width: 100%;">
+                                <video id="videoPlayer" width="100%" height="450" controls preload="metadata" style="border-radius: 8px; background: #000;">
+                                    <source src="/video-file/${jobId}/" type="video/mp4">
+                                    Your browser does not support the video tag.
+                                </video>
+                                <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                        <strong>⏰ Current Timestamp: ${timestamp.toFixed(1)}s</strong>
+                                        <div>
+                                            <button class="btn btn-info btn-small" onclick="copyTimestamp(${timestamp})">📋 Copy Timestamp</button>
+                                            <button class="btn btn-primary btn-small" onclick="shareSegment('${jobId}', ${timestamp})">🔗 Share Segment</button>
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; gap: 10px; align-items: center;">
+                                        <button class="btn btn-success btn-small" onclick="seekToTimestamp(${timestamp})">⏭️ Jump to Timestamp</button>
+                                        <button class="btn btn-info btn-small" onclick="rewind10()">⏪ -10s</button>
+                                        <button class="btn btn-info btn-small" onclick="forward10()">⏩ +10s</button>
+                                        <span id="currentTime" style="font-weight: bold;">0:00</span>
+                                        <span>/</span>
+                                        <span id="totalDuration">0:00</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    modalBody.innerHTML = playerHtml;
+                    modal.style.display = 'flex';
+                    currentVideoModal = modal;
+                    
+                    // Initialize appropriate player
+                    setTimeout(() => {
+                        if (data.is_youtube && data.youtube_video_id) {
+                            initializeYouTubePlayer(data.youtube_video_id, timestamp);
+                        } else {
+                            initializeVideoPlayer(timestamp);
+                        }
+                    }, 100);
+                })
+                .catch(error => {
+                    console.error('Error fetching video details:', error);
+                    alert('Error loading video player');
+                });
+        }
+
+        function initializeVideoPlayer(seekTime = 0) {
+            const video = document.getElementById('videoPlayer');
+            const currentTimeSpan = document.getElementById('currentTime');
+            const totalDurationSpan = document.getElementById('totalDuration');
+            
+            if (!video) return;
+            
+            // Wait for video metadata to load
+            video.addEventListener('loadedmetadata', function() {
+                // Set total duration
+                totalDurationSpan.textContent = formatTime(video.duration);
+                
+                // Seek to specified timestamp
+                if (seekTime > 0) {
+                    video.currentTime = seekTime;
+                }
+            });
+            
+            // Update current time display
+            video.addEventListener('timeupdate', function() {
+                currentTimeSpan.textContent = formatTime(video.currentTime);
+            });
+            
+            // Handle errors
+            video.addEventListener('error', function(e) {
+                console.error('Video error:', e);
+                document.getElementById('modalBody').innerHTML = `
+                    <div style="text-align: center; padding: 40px;">
+                        <div style="font-size: 3em; margin-bottom: 20px;">❌</div>
+                        <h3>Video Loading Error</h3>
+                        <p>Unable to load the video file. Please try again.</p>
+                        <p style="color: #7f8c8d; font-size: 0.9em;">Error: ${e.message || 'Unknown error'}</p>
+                    </div>
+                `;
+            });
+            
+            // Load the video
+            video.load();
+        }
+
+        function seekToTimestamp(timestamp) {
+            const video = document.getElementById('videoPlayer');
+            if (video) {
+                video.currentTime = timestamp;
+                video.play();
+            }
+        }
+
+        function rewind10() {
+            const video = document.getElementById('videoPlayer');
+            if (video) {
+                video.currentTime = Math.max(0, video.currentTime - 10);
+            }
+        }
+
+        function forward10() {
+            const video = document.getElementById('videoPlayer');
+            if (video) {
+                video.currentTime = Math.min(video.duration, video.currentTime + 10);
+            }
+        }
+
+        // YouTube player functions
+        function initializeYouTubePlayer(videoId, seekTime = 0) {
+            // YouTube iframe API will handle the seeking via the start parameter
+            console.log(`YouTube player initialized for video ${videoId} at ${seekTime}s`);
+        }
+
+        function seekYouTubeToTimestamp(timestamp) {
+            const iframe = document.getElementById('youtubePlayer');
+            if (iframe) {
+                const youtubeStartTime = Math.floor(timestamp);
+                // Update iframe src to seek to new timestamp
+                const currentSrc = iframe.src;
+                const baseUrl = currentSrc.split('?')[0];
+                iframe.src = `${baseUrl}?start=${youtubeStartTime}&autoplay=1&enablejsapi=1`;
+            }
+        }
+
+        function seekYouTubeRelative(seconds) {
+            // For relative seeking, we'd need the YouTube API
+            // For now, just show a message
+            alert(`YouTube relative seeking: ${seconds > 0 ? '+' : ''}${seconds}s\nThis feature requires YouTube API integration.`);
+        }
+
+        function formatTime(seconds) {
+            if (isNaN(seconds)) return '0:00';
+            const minutes = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${minutes}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function showSegmentDetails(jobId, startTime, endTime, text) {
+            const modal = document.getElementById('videoModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            
+            modalTitle.textContent = 'Segment Details';
+            modalBody.innerHTML = `
+                <div>
+                    <h3>Segment Information</h3>
+                    <div style="margin: 20px 0;">
+                        <strong>Time Range:</strong> ${startTime.toFixed(1)}s - ${endTime.toFixed(1)}s<br>
+                        <strong>Duration:</strong> ${(endTime - startTime).toFixed(1)} seconds<br>
+                        <strong>Video:</strong> ${jobId}
+                    </div>
+                    <div style="margin: 20px 0;">
+                        <strong>Content:</strong>
+                        <div style="padding: 15px; background: #f8f9fa; border-radius: 6px; margin-top: 10px;">
+                            ${text}
+                        </div>
+                    </div>
+                    <div style="margin-top: 30px;">
+                        <button class="btn btn-success" onclick="playSegment('${jobId}', ${startTime})">▶️ Play Segment</button>
+                        <button class="btn btn-info" onclick="copySegmentText('${text.replace(/'/g, "\\'")}')">📋 Copy Text</button>
+                        <button class="btn btn-primary" onclick="shareSegment('${jobId}', ${startTime})">🔗 Share</button>
+                    </div>
+                </div>
+            `;
+            
+            modal.style.display = 'flex';
+            currentVideoModal = modal;
+        }
+
+        function showVideoTimeline(jobId, videoName) {
+            // Fetch video details and show timeline
+            fetch(`/api/video/${jobId}/`)
+                .then(response => response.json())
+                .then(data => {
+                    const modal = document.getElementById('videoModal');
+                    const modalTitle = document.getElementById('modalTitle');
+                    const modalBody = document.getElementById('modalBody');
+                    
+                    modalTitle.textContent = `${videoName} - Timeline`;
+                    
+                    let segmentsHtml = '';
+                    if (data.segments && data.segments.length > 0) {
+                        segmentsHtml = data.segments.map((segment, index) => `
+                            <div class="search-segment" style="margin: 10px 0;">
+                                <div class="segment-content">
+                                    <strong>${segment.start_time.toFixed(1)}s - ${segment.end_time.toFixed(1)}s:</strong>
+                                    <div>${segment.text}</div>
+                                </div>
+                                <div class="segment-actions">
+                                    <button class="btn btn-success btn-segment" onclick="playSegment('${jobId}', ${segment.start_time})">▶️ Play</button>
+                                    <button class="btn btn-info btn-segment" onclick="seekVideoInTimeline(${segment.start_time})">⏭️ Seek</button>
+                                </div>
+                            </div>
+                        `).join('');
+                    } else {
+                        segmentsHtml = '<p>No timeline segments available.</p>';
+                    }
+                    
+                    let playerHtml;
+                    if (data.is_youtube && data.youtube_video_id) {
+                        // YouTube timeline player
+                        playerHtml = `
+                            <div style="margin-bottom: 20px;">
+                                <div style="position: relative; width: 100%; height: 450px; border-radius: 8px; overflow: hidden; background: #000;">
+                                    <iframe id="timelineYouTubePlayer" width="100%" height="450" 
+                                            src="https://www.youtube.com/embed/${data.youtube_video_id}?enablejsapi=1" 
+                                            frameborder="0" 
+                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                                            allowfullscreen>
+                                    </iframe>
+                                </div>
+                                <div style="margin-top: 10px; padding: 10px; background: #e3f2fd; border-radius: 6px; font-size: 0.9em;">
+                                    <strong>📺 YouTube Video:</strong> Video file was cleaned up to save storage. Playing from YouTube directly.
+                                    <a href="${data.youtube_url}" target="_blank" style="margin-left: 10px;">🔗 Open on YouTube</a>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        // Local video timeline player
+                        playerHtml = `
+                            <div style="margin-bottom: 20px;">
+                                <video id="timelineVideoPlayer" width="100%" height="450" controls preload="metadata" style="border-radius: 8px; background: #000;">
+                                    <source src="/video-file/${jobId}/" type="video/mp4">
+                                    Your browser does not support the video tag.
+                                </video>
+                            </div>
+                        `;
+                    }
+                    
+                    modalBody.innerHTML = `
+                        <div style="max-width: 900px; width: 100%;">
+                            ${playerHtml}
+                            
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                                <div>
+                                    <h3>📊 Video Info</h3>
+                                    <div style="margin: 15px 0; padding: 15px; background: #f8f9fa; border-radius: 6px;">
+                                        <strong>Duration:</strong> ${data.metadata.duration_seconds.toFixed(1)} seconds<br>
+                                        <strong>Resolution:</strong> ${data.metadata.width_pixels}x${data.metadata.height_pixels}<br>
+                                        <strong>Total Segments:</strong> ${data.segment_count}<br>
+                                        <strong>Language:</strong> ${data.transcription.language}<br>
+                                        <strong>Word Count:</strong> ${data.transcription.word_count}
+                                    </div>
+                                    <button class="btn btn-info" onclick="copyFullTranscript('${data.transcription.text.replace(/'/g, "\\'")}')">📋 Copy Full Transcript</button>
+                                </div>
+                                
+                                <div>
+                                    <h3>📑 Timeline Segments</h3>
+                                    <div style="max-height: 300px; overflow-y: auto; border: 1px solid #e0e0e0; border-radius: 6px; padding: 10px;">
+                                        ${segmentsHtml}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    modal.style.display = 'flex';
+                    currentVideoModal = modal;
+                    
+                    // Initialize timeline video player
+                    setTimeout(() => {
+                        if (data.is_youtube && data.youtube_video_id) {
+                            initializeTimelineYouTubePlayer(data.youtube_video_id);
+                        } else {
+                            initializeTimelinePlayer();
+                        }
+                    }, 100);
+                })
+                .catch(error => {
+                    console.error('Error fetching video details:', error);
+                    alert('Error loading video timeline');
+                });
+        }
+
+        function initializeTimelinePlayer() {
+            const video = document.getElementById('timelineVideoPlayer');
+            if (!video) return;
+            
+            video.addEventListener('error', function(e) {
+                console.error('Timeline video error:', e);
+            });
+            
+            video.load();
+        }
+
+        function initializeTimelineYouTubePlayer(videoId) {
+            console.log(`Timeline YouTube player initialized for video ${videoId}`);
+            // YouTube iframe will handle initialization automatically
+        }
+
+        function seekVideoInTimeline(timestamp) {
+            const video = document.getElementById('timelineVideoPlayer');
+            const youtubePlayer = document.getElementById('timelineYouTubePlayer');
+            
+            if (video) {
+                // Local video player
+                video.currentTime = timestamp;
+                video.play();
+            } else if (youtubePlayer) {
+                // YouTube player - update iframe src to seek to timestamp
+                const youtubeStartTime = Math.floor(timestamp);
+                const currentSrc = youtubePlayer.src;
+                const baseUrl = currentSrc.split('?')[0];
+                youtubePlayer.src = `${baseUrl}?start=${youtubeStartTime}&autoplay=1&enablejsapi=1`;
+            }
+        }
+
+        function searchInVideo(jobId) {
+            // Focus on search box and add video filter
+            const searchBox = document.querySelector('input[name="query"]');
+            searchBox.focus();
+            searchBox.value = `video:${jobId} `;
+        }
+
+        function closeVideoModal() {
+            if (currentVideoModal) {
+                currentVideoModal.style.display = 'none';
+                currentVideoModal = null;
+            }
+        }
+
+        function copyTimestamp(timestamp) {
+            navigator.clipboard.writeText(`${timestamp.toFixed(1)}s`).then(() => {
+                alert('Timestamp copied to clipboard!');
+            });
+        }
+
+        function copySegmentText(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Segment text copied to clipboard!');
+            });
+        }
+
+        function copyFullTranscript(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                alert('Full transcript copied to clipboard!');
+            });
+        }
+
+        function shareSegment(jobId, timestamp) {
+            const url = `${window.location.origin}/video/${jobId}/?t=${timestamp}`;
+            navigator.clipboard.writeText(url).then(() => {
+                alert('Shareable link copied to clipboard!');
+            });
+        }
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                if (currentVideoModal) {
+                    closeVideoModal();
+                } else {
+                    closeEditMetadataModal();
+                }
+            }
+        });
+
+        // Close modal when clicking outside
+        document.getElementById('videoModal').addEventListener('click', function(event) {
+            if (event.target === this) {
+                closeVideoModal();
+            }
+        });
+        
+        // Close edit metadata modal when clicking outside
+        document.getElementById('editMetadataModal').addEventListener('click', function(event) {
+            if (event.target === this) {
+                closeEditMetadataModal();
+            }
+        });
+
+        // Tab switching functionality
+        function showTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Remove active class from all tab buttons
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            if (tabName === 'file') {
+                document.getElementById('fileUpload').classList.add('active');
+                document.getElementById('fileTab').classList.add('active');
+            } else if (tabName === 'youtube') {
+                document.getElementById('youtubeUpload').classList.add('active');
+                document.getElementById('youtubeTab').classList.add('active');
+            } else if (tabName === 'playlist') {
+                document.getElementById('playlistUpload').classList.add('active');
+                document.getElementById('playlistTab').classList.add('active');
+            }
+        }
+
+        // YouTube URL validation
+        function validateYouTubeUrl(url) {
+            const patterns = [
+                /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=[\w-]+)/,
+                /^(https?:\/\/)?(www\.)?(youtu\.be\/[\w-]+)/,
+                /^(https?:\/\/)?(www\.)?(youtube\.com\/embed\/[\w-]+)/,
+                /^(https?:\/\/)?(www\.)?(youtube\.com\/v\/[\w-]+)/
+            ];
+            
+            return patterns.some(pattern => pattern.test(url));
+        }
+
+        // Add real-time YouTube URL validation
+        document.addEventListener('DOMContentLoaded', function() {
+            const youtubeInput = document.querySelector('.youtube-input');
+            if (youtubeInput) {
+                youtubeInput.addEventListener('input', function() {
+                    const url = this.value.trim();
+                    if (url && !validateYouTubeUrl(url)) {
+                        this.style.borderColor = '#e74c3c';
+                        this.style.boxShadow = '0 0 0 3px rgba(231, 76, 60, 0.1)';
+                    } else if (url && validateYouTubeUrl(url)) {
+                        this.style.borderColor = '#27ae60';
+                        this.style.boxShadow = '0 0 0 3px rgba(39, 174, 96, 0.1)';
+                    } else {
+                        this.style.borderColor = '#e74c3c';
+                        this.style.boxShadow = 'none';
+                    }
+                });
+            }
+
+            // Set up form submission handlers for progress tracking
+            setupProgressTracking();
+        });
+
+        // Progress tracking variables
+        let progressInterval = null;
+        let currentJobId = null;
+
+        function setupProgressTracking() {
+            // Add event listeners to upload forms
+            const uploadForms = document.querySelectorAll('.upload-form');
+            uploadForms.forEach(form => {
+                form.addEventListener('submit', function(e) {
+                    // Don't prevent default - let form submit normally
+                    // Just show initial progress
+                    showProgressSnackbar();
+                    
+                    // Start checking for new jobs after a short delay
+                    setTimeout(() => {
+                        startJobPolling();
+                    }, 2000);
+                });
+            });
+        }
+
+        function showProgressSnackbar() {
+            const snackbar = document.getElementById('progressSnackbar');
+            const progressIcon = document.querySelector('.progress-icon');
+            const progressTitle = document.getElementById('progressTitle');
+            const progressDetail = document.getElementById('progressDetail');
+            const progressFill = document.getElementById('progressFill');
+
+            // Reset to initial state
+            progressIcon.textContent = '⏳';
+            progressTitle.textContent = 'Uploading video...';
+            progressDetail.textContent = 'Preparing for processing';
+            progressFill.className = 'progress-fill';
+            progressFill.style.width = '10%';
+
+            snackbar.classList.add('visible');
+        }
+
+        function hideProgressSnackbar() {
+            const snackbar = document.getElementById('progressSnackbar');
+            snackbar.classList.remove('visible');
+            
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+            currentJobId = null;
+        }
+
+        function startJobPolling() {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+            }
+
+            progressInterval = setInterval(() => {
+                checkJobProgress();
+            }, 2000); // Check every 2 seconds
+
+            // Also check immediately
+            checkJobProgress();
+        }
+
+        function checkJobProgress() {
+            fetch('/api/jobs/latest/')
+                .then(response => response.json())
+                .then(latestJob => {
+                    if (latestJob.error) {
+                        console.log('No jobs found yet');
+                        return;
+                    }
+                    
+                    if (!currentJobId) {
+                        currentJobId = latestJob.job_id;
+                    }
+                    
+                    // Only track the current job
+                    if (latestJob.job_id === currentJobId) {
+                        updateProgressFromJob(latestJob);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking job progress:', error);
+                });
+        }
+
+        function updateProgressFromJob(job) {
+            const progressIcon = document.querySelector('.progress-icon');
+            const progressTitle = document.getElementById('progressTitle');
+            const progressDetail = document.getElementById('progressDetail');
+            const progressFill = document.getElementById('progressFill');
+
+            switch (job.status) {
+                case 'pending':
+                    progressIcon.textContent = '⏳';
+                    progressTitle.textContent = 'Video uploaded';
+                    progressDetail.textContent = 'Waiting in queue for processing...';
+                    progressFill.style.width = '20%';
+                    progressFill.className = 'progress-fill';
+                    break;
+
+                case 'processing':
+                    progressIcon.textContent = '⚙️';
+                    progressTitle.textContent = 'Processing video...';
+                    
+                    // Determine processing stage based on available data
+                    if (job.has_transcript && job.word_count > 0) {
+                        progressDetail.textContent = `Generating searchable segments (${job.word_count} words transcribed)`;
+                        progressFill.style.width = '85%';
+                    } else if (job.processing_time > 10) {
+                        progressDetail.textContent = 'Transcribing audio with AI (this may take a few minutes)';
+                        progressFill.style.width = '70%';
+                    } else {
+                        progressDetail.textContent = 'Extracting audio and preparing for transcription';
+                        progressFill.style.width = '60%';
+                    }
+                    
+                    progressFill.className = 'progress-fill processing';
+                    break;
+
+                case 'completed':
+                    // Check if the video is truly ready for searching
+                    if (job.is_searchable && job.has_transcript && job.has_segments) {
+                        progressIcon.textContent = '✅';
+                        progressTitle.textContent = 'Video ready for searching!';
+                        progressDetail.textContent = `Transcribed ${job.word_count} words with ${job.segment_count} segments in ${job.language}`;
+                        progressFill.style.width = '100%';
+                        progressFill.className = 'progress-fill completed';
+                        
+                        // Auto-hide after 5 seconds
+                        setTimeout(() => {
+                            hideProgressSnackbar();
+                            // Refresh the page to show the new video
+                            window.location.reload();
+                        }, 5000);
+                        
+                        // Stop polling
+                        if (progressInterval) {
+                            clearInterval(progressInterval);
+                            progressInterval = null;
+                        }
+                    } else {
+                        // Job marked complete but not searchable yet
+                        progressIcon.textContent = '⚠️';
+                        progressTitle.textContent = 'Processing incomplete';
+                        progressDetail.textContent = 'Video processed but missing transcription data';
+                        progressFill.style.width = '90%';
+                        progressFill.className = 'progress-fill failed';
+                        
+                        // Continue polling in case it's still processing
+                        setTimeout(() => {
+                            // Check if we should treat this as failed
+                            if (job.completed_at) {
+                                // Job says it's done but not searchable - mark as failed
+                                progressIcon.textContent = '❌';
+                                progressTitle.textContent = 'Processing incomplete';
+                                progressDetail.textContent = 'Video processed but not ready for searching';
+                                progressFill.className = 'progress-fill failed';
+                                
+                                setTimeout(() => {
+                                    hideProgressSnackbar();
+                                }, 8000);
+                                
+                                if (progressInterval) {
+                                    clearInterval(progressInterval);
+                                    progressInterval = null;
+                                }
+                            }
+                        }, 5000);
+                    }
+                    break;
+
+                case 'failed':
+                    progressIcon.textContent = '❌';
+                    progressTitle.textContent = 'Processing failed';
+                    progressDetail.textContent = 'There was an error processing your video';
+                    progressFill.style.width = '100%';
+                    progressFill.className = 'progress-fill failed';
+                    
+                    // Auto-hide after 8 seconds
+                    setTimeout(() => {
+                        hideProgressSnackbar();
+                    }, 8000);
+                    
+                    // Stop polling
+                    if (progressInterval) {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                    }
+                    break;
+            }
+        }
+
+        // Admin Panel Functions
+        function showAdminTab(tabName) {
+            // Hide all admin tab contents
+            document.querySelectorAll('.admin-tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Remove active class from all admin tab buttons
+            document.querySelectorAll('.admin-tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById(`admin-${tabName}`).classList.add('active');
+            event.target.classList.add('active');
+            
+            // Load data for the selected tab
+            if (tabName === 'search-management') {
+                refreshSearchStats();
+            } else if (tabName === 'storage-management') {
+                refreshStorageStats();
+            } else if (tabName === 'job-management') {
+                refreshPendingJobs();
+            } else if (tabName === 'statistics') {
+                refreshDetailedStats();
+            }
+        }
+
+        function showAdminResult(containerId, message, type = 'info') {
+            const container = document.getElementById(containerId);
+            container.innerHTML = `<div class="admin-result ${type}">${message}</div>`;
+        }
+
+        // Search Management Functions
+        function refreshSearchStats() {
+            const display = document.getElementById('search-stats-display');
+            display.innerHTML = 'Loading...';
+            
+            fetch('/api/search-status/')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.available && data.initialized) {
+                        display.innerHTML = `
+                            <div style="color: #28a745;">✅ Search Engine Active</div>
+                            <div><strong>Model:</strong> ${data.model_name}</div>
+                            <div><strong>Indexed Segments:</strong> ${data.indexed_segments}</div>
+                        `;
+                    } else if (data.available) {
+                        display.innerHTML = `
+                            <div style="color: #ffc107;">⚠️ Search Engine Available but Not Initialized</div>
+                            <div><strong>Model:</strong> ${data.model_name}</div>
+                            <div>Click "Rebuild Search Index" to initialize</div>
+                        `;
+                    } else {
+                        display.innerHTML = `
+                            <div style="color: #dc3545;">❌ Search Engine Not Available</div>
+                            <div>AI search dependencies not installed</div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    display.innerHTML = `<div style="color: #dc3545;">Error: ${error.message}</div>`;
+                });
+        }
+
+        function rebuildSearchIndex() {
+            const button = event.target;
+            const originalText = button.textContent;
+            button.textContent = '🔄 Rebuilding...';
+            button.disabled = true;
+
+            const formData = new FormData();
+            
+            fetch('/api/rebuild-search-index/', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showAdminResult('search-management-result', `✅ ${data.message}`, 'success');
+                    refreshSearchStats();
+                } else {
+                    showAdminResult('search-management-result', `❌ ${data.error}`, 'error');
+                }
+            })
+            .catch(error => {
+                showAdminResult('search-management-result', `❌ Error: ${error.message}`, 'error');
+            })
+            .finally(() => {
+                button.textContent = originalText;
+                button.disabled = false;
+            });
+        }
+
+        // Storage Management Functions
+        function refreshStorageStats() {
+            refreshDetailedStats().then(data => {
+                const display = document.getElementById('storage-stats-display');
+                if (data && data.storage_stats) {
+                    display.innerHTML = `
+                        <div><strong>Total Storage:</strong> ${data.storage_stats.total_file_size_gb} GB</div>
+                        <div><strong>Videos:</strong> ${data.video_stats.total_videos}</div>
+                        <div style="margin-top: 10px; font-size: 0.9em; color: #7f8c8d;">
+                            Click cleanup to free space from YouTube videos
+                        </div>
+                    `;
+                } else {
+                    display.innerHTML = 'Error loading storage stats';
+                }
+            });
+        }
+
+        function cleanupYouTube(dryRun) {
+            const button = event.target;
+            const originalText = button.textContent;
+            button.textContent = dryRun ? '👁️ Analyzing...' : '🗑️ Cleaning...';
+            button.disabled = true;
+
+            const formData = new FormData();
+            formData.append('dry_run', dryRun);
+            
+            fetch('/api/cleanup-youtube/', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    let resultHtml = `<h4>${dryRun ? '📋 Cleanup Preview' : '✅ Cleanup Complete'}</h4>`;
+                    resultHtml += `<p><strong>Files ${dryRun ? 'that would be' : ''} processed:</strong> ${data.files_processed}</p>`;
+                    resultHtml += `<p><strong>Space ${dryRun ? 'that would be' : ''} freed:</strong> ${data.space_freed_mb} MB</p>`;
+                    
+                    if (data.files && data.files.length > 0) {
+                        resultHtml += '<p><strong>Files:</strong></p><ul>';
+                        data.files.forEach(file => {
+                            resultHtml += `<li>${file.name} (${file.size_mb} MB)</li>`;
+                        });
+                        resultHtml += '</ul>';
+                    }
+                    
+                    showAdminResult('storage-management-result', resultHtml, 'success');
+                    
+                    if (!dryRun) {
+                        refreshStorageStats();
+                    }
+                } else {
+                    showAdminResult('storage-management-result', `❌ ${data.error}`, 'error');
+                }
+            })
+            .catch(error => {
+                showAdminResult('storage-management-result', `❌ Error: ${error.message}`, 'error');
+            })
+            .finally(() => {
+                button.textContent = originalText;
+                button.disabled = false;
+            });
+        }
+
+        // Job Management Functions
+        function refreshPendingJobs() {
+            const display = document.getElementById('pending-jobs-display');
+            display.innerHTML = 'Loading...';
+            
+            fetch('/api/pending-jobs/')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.pending_jobs && data.pending_jobs.length > 0) {
+                        let html = `<p><strong>${data.count} pending job${data.count !== 1 ? 's' : ''}</strong></p>`;
+                        data.pending_jobs.forEach(job => {
+                            html += `
+                                <div class="pending-job">
+                                    <h5>${job.video_name}</h5>
+                                    <div class="job-meta">
+                                        <span>ID: ${job.job_id.substring(0, 8)}...</span>
+                                        <span>${job.file_size_mb} MB</span>
+                                        <button class="btn-process" onclick="processJob('${job.job_id}')">
+                                            ⚡ Process
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        display.innerHTML = html;
+                    } else {
+                        display.innerHTML = '<p style="color: #28a745;">✅ No pending jobs</p>';
+                    }
+                })
+                .catch(error => {
+                    display.innerHTML = `<div style="color: #dc3545;">Error: ${error.message}</div>`;
+                });
+        }
+
+        function processJob(jobId) {
+            const formData = new FormData();
+            formData.append('job_id', jobId);
+            
+            fetch('/api/process-job/', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showAdminResult('job-management-result', `✅ ${data.message}`, 'success');
+                    refreshPendingJobs();
+                    
+                    // Start progress tracking for this job
+                    currentJobId = data.job_id;
+                    showProgressSnackbar();
+                    startJobPolling();
+                } else {
+                    showAdminResult('job-management-result', `❌ ${data.error}`, 'error');
+                }
+            })
+            .catch(error => {
+                showAdminResult('job-management-result', `❌ Error: ${error.message}`, 'error');
+            });
+        }
+
+        function lookupTimestamp() {
+            const jobId = document.getElementById('timestamp-job-id').value.trim();
+            const timestamp = parseFloat(document.getElementById('timestamp-value').value);
+            
+            if (!jobId || isNaN(timestamp)) {
+                showAdminResult('job-management-result', '❌ Please provide both Job ID and timestamp', 'error');
+                return;
+            }
+            
+            fetch(`/api/timestamp-content/${jobId}/?timestamp=${timestamp}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        showAdminResult('job-management-result', `❌ ${data.error}`, 'error');
+                    } else {
+                        const html = `
+                            <h4>🕐 Content at ${data.timestamp}s</h4>
+                            <p><strong>Video:</strong> ${data.video_name}</p>
+                            <p><strong>Segment:</strong> ${data.segment.start_time}s - ${data.segment.end_time}s</p>
+                            <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin-top: 10px;">
+                                ${data.segment.text}
+                            </div>
+                            <div style="margin-top: 10px;">
+                                <button class="btn btn-success btn-small" onclick="playSegment('${data.job_id}', ${data.segment.start_time})">
+                                    ▶️ Play Segment
+                                </button>
+                            </div>
+                        `;
+                        showAdminResult('job-management-result', html, 'success');
+                    }
+                })
+                .catch(error => {
+                    showAdminResult('job-management-result', `❌ Error: ${error.message}`, 'error');
+                });
+        }
+
+        // Statistics Functions
+        function refreshDetailedStats() {
+            return fetch('/api/detailed-stats/')
+                .then(response => response.json())
+                .then(data => {
+                    const display = document.getElementById('detailed-stats-display');
+                    
+                    if (data.error) {
+                        display.innerHTML = `<div style="color: #dc3545;">Error: ${data.error}</div>`;
+                        return null;
+                    }
+                    
+                    let html = '';
+                    
+                    // Video Stats
+                    html += `
+                        <div class="stat-panel">
+                            <h5>📹 Video Statistics</h5>
+                            <div class="stat-value">${data.video_stats.total_videos}</div>
+                            <div>Total Videos</div>
+                            <div style="margin-top: 10px; font-size: 0.9em;">
+                                <div>Pending: ${data.video_stats.pending_jobs}</div>
+                                <div>Processing: ${data.video_stats.processing_jobs}</div>
+                                <div>Failed: ${data.video_stats.failed_jobs}</div>
+                                <div>Recent (7d): ${data.video_stats.recent_jobs_7_days}</div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Processing Stats
+                    html += `
+                        <div class="stat-panel">
+                            <h5>⚙️ Processing Statistics</h5>
+                            <div class="stat-value">${data.processing_stats.total_processing_time}s</div>
+                            <div>Total Processing Time</div>
+                            <div style="margin-top: 10px; font-size: 0.9em;">
+                                <div>Avg: ${data.processing_stats.average_processing_time}s</div>
+                                <div>Content: ${data.processing_stats.total_duration_hours}h</div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Content Stats
+                    html += `
+                        <div class="stat-panel">
+                            <h5>📝 Content Statistics</h5>
+                            <div class="stat-value">${data.content_stats.total_words.toLocaleString()}</div>
+                            <div>Total Words</div>
+                            <div style="margin-top: 10px; font-size: 0.9em;">
+                                Languages: ${Object.entries(data.content_stats.language_distribution).map(([lang, count]) => `${lang} (${count})`).join(', ') || 'None'}
+                            </div>
+                        </div>
+                    `;
+                    
+                    // Storage Stats
+                    html += `
+                        <div class="stat-panel">
+                            <h5>💾 Storage Statistics</h5>
+                            <div class="stat-value">${data.storage_stats.total_file_size_gb}</div>
+                            <div>Total Storage (GB)</div>
+                        </div>
+                    `;
+                    
+                    // Search Stats
+                    if (data.search_stats && !data.search_stats.error) {
+                        html += `
+                            <div class="stat-panel">
+                                <h5>🔍 Search Statistics</h5>
+                                <div class="stat-value">${data.search_stats.indexed_segments || 0}</div>
+                                <div>Indexed Segments</div>
+                                <div style="margin-top: 10px; font-size: 0.9em;">
+                                    ${data.search_stats.is_initialized ? '✅ Active' : '❌ Not Initialized'}
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    display.innerHTML = html;
+                    return data;
+                })
+                .catch(error => {
+                    const display = document.getElementById('detailed-stats-display');
+                    display.innerHTML = `<div style="color: #dc3545;">Error: ${error.message}</div>`;
+                    return null;
+                });
+        }
+
+        // Initialize admin panel on load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load initial data for default tab
+            refreshSearchStats();
+        });
+
+        // Hybrid Processing Functions
+        function checkHybridBatches() {
+            const button = document.getElementById('check-hybrid-batches');
+            const statusDiv = document.getElementById('hybrid-status');
+            const batchesDiv = document.getElementById('hybrid-batches');
+            const batchList = document.getElementById('hybrid-batch-list');
+            const processedBatchList = document.getElementById('processed-batch-list');
+            
+            button.textContent = '🔄 Checking...';
+            button.disabled = true;
+            
+            // Fetch both available and processed batches
+            Promise.all([
+                fetch('/api/hybrid/status/').then(response => response.json()),
+                fetch('/api/hybrid/processed/').then(response => response.json())
+            ])
+            .then(([availableData, processedData]) => {
+                if (availableData.error) {
+                    statusDiv.innerHTML = `<div style="color: #dc3545; background: #f8d7da; padding: 10px; border-radius: 5px;">❌ Error: ${availableData.error}</div>`;
+                    statusDiv.style.display = 'block';
+                    batchesDiv.style.display = 'none';
+                    return;
+                }
+                
+                // Handle available batches
+                if (availableData.batches_available === 0) {
+                    statusDiv.innerHTML = `<div style="color: #856404; background: #fff3cd; padding: 10px; border-radius: 5px;">📭 No downloaded videos found. Use the downloader script first!</div>`;
+                    statusDiv.style.display = 'block';
+                } else {
+                    statusDiv.innerHTML = `<div style="color: #155724; background: #d4edda; padding: 10px; border-radius: 5px;">✅ Found ${availableData.batches_available} batch${availableData.batches_available > 1 ? 'es' : ''} ready to process!</div>`;
+                    statusDiv.style.display = 'block';
+                }
+                
+                // Display available batches
+                let availableHtml = '';
+                availableData.batches.forEach(batch => {
+                    const createdDate = new Date(batch.created_at * 1000).toLocaleString();
+                    availableHtml += `
+                        <div style="border: 1px solid #dee2e6; border-radius: 8px; padding: 15px; margin-bottom: 10px; background: white;">
+                            <h5 style="margin: 0 0 10px 0;">📦 ${batch.batch_name}</h5>
+                            <div style="color: #6c757d; font-size: 0.9em; margin-bottom: 10px;">
+                                <div>🎥 ${batch.total_videos} video${batch.total_videos > 1 ? 's' : ''}</div>
+                                <div>📅 Created: ${createdDate}</div>
+                            </div>
+                            <button onclick="processHybridBatch('${batch.file_path}', '${batch.batch_name}')" 
+                                    class="btn btn-success" style="width: 100%;">
+                                🚀 Process ${batch.total_videos} Video${batch.total_videos > 1 ? 's' : ''}
+                            </button>
+                        </div>
+                    `;
+                });
+                batchList.innerHTML = availableHtml;
+                
+                // Display processed batches
+                let processedHtml = '';
+                if (processedData.batches && processedData.batches.length > 0) {
+                    processedData.batches.forEach(batch => {
+                        const createdDate = new Date(batch.created_at * 1000).toLocaleString();
+                        const processedDate = new Date(batch.processed_at * 1000).toLocaleString();
+                        processedHtml += `
+                            <div style="border: 1px solid #28a745; border-radius: 8px; padding: 10px; margin-bottom: 8px; background: #f8fff9;">
+                                <h6 style="margin: 0 0 5px 0; color: #28a745;">✅ ${batch.batch_name}</h6>
+                                <div style="color: #6c757d; font-size: 0.8em;">
+                                    <div>🎥 ${batch.total_videos} video${batch.total_videos > 1 ? 's' : ''} processed</div>
+                                    <div>📅 Created: ${createdDate}</div>
+                                    <div>⚙️ Processed: ${processedDate}</div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                } else {
+                    processedHtml = '<div style="color: #6c757d; font-style: italic;">No processed batches yet.</div>';
+                }
+                processedBatchList.innerHTML = processedHtml;
+                
+                batchesDiv.style.display = 'block';
+            })
+            .catch(error => {
+                statusDiv.innerHTML = `<div style="color: #dc3545; background: #f8d7da; padding: 10px; border-radius: 5px;">❌ Error: ${error.message}</div>`;
+                statusDiv.style.display = 'block';
+                batchesDiv.style.display = 'none';
+            })
+            .finally(() => {
+                button.textContent = '🔍 Check for Downloaded Videos';
+                button.disabled = false;
+            });
+        }
+
+        function processHybridBatch(batchFile, batchName) {
+            if (!confirm(`Process all videos in batch "${batchName}"? This may take several minutes.`)) {
+                return;
+            }
+            
+            const statusDiv = document.getElementById('hybrid-status');
+            statusDiv.innerHTML = `<div style="color: #004085; background: #cce7ff; padding: 10px; border-radius: 5px;">⚙️ Processing batch "${batchName}"... This may take a while.</div>`;
+            statusDiv.style.display = 'block';
+            
+            fetch('/api/hybrid/process/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+                },
+                body: JSON.stringify({
+                    batch_file: batchFile
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    statusDiv.innerHTML = `
+                        <div style="color: #155724; background: #d4edda; padding: 15px; border-radius: 5px;">
+                            ✅ Successfully processed ${data.total_processed} video${data.total_processed > 1 ? 's' : ''} from "${batchName}"!
+                            <div style="margin-top: 10px; font-size: 0.9em;">
+                                ${data.processed_videos.map(v => `📹 ${v.title}`).join('<br>')}
+                            </div>
+                            <button onclick="window.location.reload()" style="margin-top: 10px;" class="btn btn-primary">
+                                🔄 Refresh Page
+                            </button>
+                        </div>
+                    `;
+                    
+                    // Refresh the hybrid batches to remove processed batch
+                    setTimeout(() => checkHybridBatches(), 2000);
+                } else {
+                    statusDiv.innerHTML = `<div style="color: #dc3545; background: #f8d7da; padding: 10px; border-radius: 5px;">❌ Error: ${data.error}</div>`;
+                }
+            })
+            .catch(error => {
+                statusDiv.innerHTML = `<div style="color: #dc3545; background: #f8d7da; padding: 10px; border-radius: 5px;">❌ Error: ${error.message}</div>`;
+            });
+        }
+
+        // Set up hybrid processing button
+        document.addEventListener('DOMContentLoaded', function() {
+            const hybridButton = document.getElementById('check-hybrid-batches');
+            if (hybridButton) {
+                hybridButton.addEventListener('click', checkHybridBatches);
+                
+                // Auto-check for batches on page load
+                setTimeout(checkHybridBatches, 1000);
+            }
+        });
+
+        // ... existing code ...
+        function editVideoMetadata(jobId, videoName, youtubeUrl) {
+            document.getElementById('editJobId').value = jobId;
+            document.getElementById('editTitle').value = videoName;
+            document.getElementById('editYoutubeUrl').value = youtubeUrl || '';
+            document.getElementById('editMetadataModal').style.display = 'flex';
+        }
+        function closeEditMetadataModal() {
+            document.getElementById('editMetadataModal').style.display = 'none';
+        }
+        function submitEditMetadata(event) {
+            event.preventDefault();
+            const jobId = document.getElementById('editJobId').value;
+            const title = document.getElementById('editTitle').value;
+            const youtubeUrl = document.getElementById('editYoutubeUrl').value;
+            
+            // Show loading state
+            const submitBtn = event.target.querySelector('button[type="submit"]');
+            const originalText = submitBtn.textContent;
+            submitBtn.textContent = 'Saving...';
+            submitBtn.disabled = true;
+            
+            fetch(`/api/video/${jobId}/update-metadata/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken')
+                },
+                body: JSON.stringify({
+                    title: title,
+                    youtube_url: youtubeUrl
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    // Close modal first
+                    closeEditMetadataModal();
+                    // Show success snackbar
+                    showSnackbar('Video metadata updated successfully!', 'success');
+                    // Reload page after a short delay
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                } else {
+                    throw new Error(data.error || 'Unknown error occurred');
+                }
+            })
+            .catch(error => {
+                console.error('Error updating metadata:', error);
+                showSnackbar(`Error: ${error.message}`, 'error');
+            })
+            .finally(() => {
+                // Reset button state
+                submitBtn.textContent = originalText;
+                submitBtn.disabled = false;
+            });
+        }
+        
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+        // ... existing code ...
+
+        // Snackbar functions
+        function showSnackbar(message, type = 'success') {
+            const snackbar = document.getElementById('snackbar');
+            const messageSpan = document.getElementById('snackbar-message');
+            
+            messageSpan.textContent = message;
+            snackbar.className = `snackbar ${type} show`;
+            
+            // Auto-hide after 3 seconds
+            setTimeout(() => {
+                hideSnackbar();
+            }, 3000);
+        }
+        
+        function hideSnackbar() {
+            const snackbar = document.getElementById('snackbar');
+            snackbar.className = 'snackbar';
+        }
+    </script>
+
+    <!-- Add hybrid processing section HTML -->
+    <script>
+        // Add hybrid section dynamically after page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            const uploadSection = document.querySelector('.upload-section');
+            if (uploadSection) {
+                const hybridSection = document.createElement('div');
+                hybridSection.className = 'upload-section';
+                hybridSection.style.cssText = 'border: 2px solid #3498db; background: linear-gradient(135deg, #e8f4fd, #f8fcff); margin-bottom: 20px;';
+                
+                hybridSection.innerHTML = `
+                    <h2>🔄 Hybrid YouTube Processing</h2>
+                    <div style="background: #d4edda; border: 1px solid #c3e6cb; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+                        <strong>📡 Network Solution:</strong> Download YouTube content in your virtual environment, then process here!
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                        <div>
+                            <h4>Step 1: Download (Virtual Environment)</h4>
+                            <div style="background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 8px; font-family: 'Courier New', monospace; font-size: 14px; overflow-x: auto;">
+                                <div># Single video</div>
+                                <div>yt-dlp -o "downloads/%(title)s.%(ext)s" "https://youtube.com/watch?v=..."</div>
+                                <br>
+                                <div># Playlist</div>
+                                <div>yt-dlp -o "downloads/%(title)s.%(ext)s" "https://www.youtube.com/playlist?list=..."</div>
+                            </div>
+                        </div>
+                        <div>
+                            <h4>Step 2: Process Downloaded Videos</h4>
+                            <button id="check-hybrid-batches" class="btn btn-primary" style="width: 100%; padding: 15px; font-size: 16px;">
+                                🔍 Check for Downloaded Videos
+                            </button>
+                            <div id="hybrid-status" style="margin-top: 10px; padding: 10px; border-radius: 5px; display: none;"></div>
+                        </div>
+                    </div>
+                    
+                    <div id="hybrid-batches" style="display: none;">
+                        <h4>📦 Available Batches:</h4>
+                        <div id="hybrid-batch-list" style="max-height: 300px; overflow-y: auto;"></div>
+                        
+                        <div id="processed-batches" style="margin-top: 30px;">
+                            <h4>✅ Processed Batches:</h4>
+                            <div id="processed-batch-list" style="max-height: 200px; overflow-y: auto; opacity: 0.7;"></div>
+                        </div>
+                    </div>
+                `;
+                
+                // Insert before the existing upload section
+                uploadSection.parentNode.insertBefore(hybridSection, uploadSection);
+            }
+        });
+    </script>
+</body>
+</html> 
