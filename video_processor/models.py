@@ -26,11 +26,12 @@ class VideoJob(models.Model):
     job_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Multi-tenancy: Add user ownership
-    user = models.ForeignKey(User, on_delete=models.CASCADE, default=1)
-
-    # Video information
+    # Note: User must be explicitly provided when creating VideoJob instances
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    
+    # Video information (removed playlist field completely)
     video_path = models.CharField(max_length=500, help_text="Path to the video file")
-    video_name = models.CharField(max_length=255, help_text="Original video filename")
+    video_name = models.CharField(max_length=500, help_text="Original video filename")
     youtube_url = models.URLField(
         null=True,
         blank=True,
@@ -66,10 +67,11 @@ class VideoJob(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
-        indexes = [
-            models.Index(fields=["user", "status"]),
-            models.Index(fields=["user", "created_at"]),
-        ]
+        # Remove indexes to avoid circular dependency in migrations
+        # indexes = [
+        #     models.Index(fields=["user", "status"]),
+        #     models.Index(fields=["user", "created_at"]),
+        # ]
 
     def __str__(self):
         return f"{self.user.username} - {self.title or self.video_path}"

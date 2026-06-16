@@ -1,0 +1,50 @@
+<script>
+function showAdminResult(containerId, message, type) {
+    const container = document.getElementById(containerId);
+    const cls = type === 'error' ? 'alert-error' : (type === 'success' ? 'alert-success' : 'text-primary');
+    container.innerHTML = `<div class="${cls} py-2">${message}</div>`;
+}
+
+function refreshSearchStats() {
+    const display = document.getElementById('search-stats-display');
+    display.innerHTML = 'Loading...';
+    fetch('/api/search-status/')
+        .then(r => r.json())
+        .then(data => {
+            if (data.available && data.initialized) {
+                display.innerHTML = `<div class="text-primary-container">Search engine active</div>
+                    <div class="text-on-surface-variant"><strong>Model:</strong> ${data.model_name}</div>
+                    <div class="text-on-surface-variant"><strong>Indexed segments:</strong> ${data.indexed_segments}</div>`;
+            } else if (data.available) {
+                display.innerHTML = `<div class="text-secondary">Available but not initialized</div>
+                    <div class="text-on-surface-variant">Click Rebuild Search Index to initialize.</div>`;
+            } else {
+                display.innerHTML = '<div class="text-on-error-container">Search engine not available</div>';
+            }
+        })
+        .catch(err => { display.innerHTML = `<div class="alert-error">${err.message}</div>`; });
+}
+
+function rebuildSearchIndex(evt) {
+    const button = evt.target;
+    const originalText = button.textContent;
+    button.textContent = 'Rebuilding...';
+    button.disabled = true;
+    const csrf = document.querySelector('[name=csrfmiddlewaretoken]');
+    fetch('/api/rebuild-search-index/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrf ? csrf.value : getCookie('csrftoken') }
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showAdminResult('search-management-result', data.message, 'success');
+                refreshSearchStats();
+            } else {
+                showAdminResult('search-management-result', data.error || 'Rebuild failed', 'error');
+            }
+        })
+        .catch(err => showAdminResult('search-management-result', err.message, 'error'))
+        .finally(() => { button.textContent = originalText; button.disabled = false; });
+}
+</script>

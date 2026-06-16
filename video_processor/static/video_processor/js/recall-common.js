@@ -1,0 +1,83 @@
+function getCookie(name) {
+    let cookieValue = null;
+    if (document.cookie && document.cookie !== '') {
+        const cookies = document.cookie.split(';');
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+}
+
+function formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function closeVideoPlayer() {
+    const overlay = document.querySelector('.video-overlay');
+    if (overlay) overlay.remove();
+}
+
+async function playSegment(videoId, timestamp) {
+    const overlay = document.createElement('div');
+    overlay.className = 'video-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = '<div style="background:#F4F4E4;color:#1a1c20;border-radius:15px;padding:40px;text-align:center;"><p>Loading video player...</p></div>';
+    document.body.appendChild(overlay);
+
+    try {
+        const response = await fetch(`/api/video/${videoId}/`);
+        const videoData = await response.json();
+        if (!response.ok) throw new Error(videoData.error || 'Failed to load video details');
+
+        let playerHTML = '';
+        if (videoData.is_youtube && videoData.youtube_video_id) {
+            const youtubeId = videoData.youtube_video_id;
+            const startTime = Math.floor(timestamp);
+            playerHTML = `
+                <iframe width="800" height="450"
+                    src="https://www.youtube.com/embed/${youtubeId}?start=${startTime}&autoplay=1"
+                    frameborder="0" allowfullscreen style="border-radius:8px;max-width:100%;"></iframe>
+                <div style="margin-top:15px;text-align:center;color:#434750;font-size:14px;">
+                    Starting at ${formatTime(timestamp)}
+                    <a href="https://www.youtube.com/watch?v=${youtubeId}&t=${startTime}s" target="_blank"
+                       style="color:#002753;margin-left:12px;">Open on YouTube</a>
+                </div>`;
+        } else {
+            playerHTML = `
+                <video width="800" height="450" controls autoplay style="border-radius:8px;max-width:100%;"
+                    onloadedmetadata="this.currentTime=${timestamp}">
+                    <source src="/video-file/${videoId}/" type="video/mp4">
+                </video>
+                <div style="margin-top:15px;text-align:center;color:#434750;font-size:14px;">
+                    Starting at ${formatTime(timestamp)}
+                </div>`;
+        }
+
+        overlay.innerHTML = `
+            <div style="background:#F4F4E4;border-radius:15px;padding:24px;max-width:900px;width:95%;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <h3 style="margin:0;color:#002753;">${videoData.video_name}</h3>
+                    <button onclick="closeVideoPlayer()" style="background:#ba1a1a;color:white;border:none;border-radius:50%;width:36px;height:36px;cursor:pointer;">×</button>
+                </div>
+                <div style="text-align:center;">${playerHTML}</div>
+            </div>`;
+    } catch (error) {
+        overlay.innerHTML = `
+            <div style="background:#F4F4E4;border-radius:15px;padding:40px;text-align:center;max-width:500px;">
+                <h3 style="color:#93000a;">Error Loading Video</h3>
+                <p>${error.message}</p>
+                <button onclick="closeVideoPlayer()" style="margin-top:16px;background:#002753;color:white;padding:10px 20px;border:none;border-radius:8px;cursor:pointer;">Close</button>
+            </div>`;
+    }
+
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeVideoPlayer();
+    });
+}

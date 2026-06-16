@@ -10,6 +10,30 @@
 - 🌐 **Modern Web Interface** - Clean, intuitive search experience
 - 📺 **YouTube Integration** - Process YouTube videos with automatic cleanup
 - 🧮 **Semantic Search** - FAISS vector similarity with sentence transformers
+- 📚 **Comprehensive API** - RESTful API with Swagger/OpenAPI documentation
+
+## 📖 Documentation
+
+### For Users
+- **[User Guide](docs/USER_GUIDE.md)** - Complete guide on using AskMyVideo
+- **[API Guide](docs/API_GUIDE.md)** - API reference and examples
+
+### For Developers
+- **[Developer Guide](docs/DEVELOPER_GUIDE.md)** - Setup, development, and contribution guide
+- **[Architecture Documentation](docs/ARCHITECTURE.md)** - System architecture overview
+- **[Search System](docs/SEARCH_SYSTEM.md)** - Deep dive into search functionality
+
+### Architecture Diagrams
+- **[System Architecture](docs/diagrams/system-architecture.md)** - High-level system design
+- **[Data Flow](docs/diagrams/data-flow.md)** - Video processing and search flows
+- **[Search Architecture](docs/diagrams/search-architecture.md)** - Search system details
+- **[API Endpoints](docs/diagrams/api-endpoints.md)** - API structure and flows
+- **[Database Schema](docs/diagrams/database-schema.md)** - Database design
+
+### API Documentation
+- **Swagger UI**: `/api/docs/` - Interactive API documentation
+- **ReDoc**: `/api/redoc/` - Alternative API documentation
+- **OpenAPI Schema**: `/api/schema/` - OpenAPI 3.0 schema (JSON/YAML)
 
 ## 🚀 Quick Start
 
@@ -44,13 +68,43 @@ Clean Search UI → Django Backend → AI Search Engine → Video Database
               Whisper AI ← Video Processor ← YouTube/Upload
 ```
 
+### System Components
+
+1. **Web Application Layer** - Django web framework with REST API
+2. **Video Processing Pipeline** - Video validation, transcription, segmentation
+3. **Search Engine System** - Multi-layered search (keyword, semantic, hybrid, enhanced)
+4. **RAG System** - Retrieval-Augmented Generation for question answering
+5. **Data Storage** - Database (SQLite/PostgreSQL) and file storage
+6. **Background Processing** - Asynchronous video processing
+
+See [Architecture Documentation](docs/ARCHITECTURE.md) for detailed information.
+
 ## 📁 Key Components
 
 - **`core_video_processor.py`** - Video processing & transcription engine
 - **`semantic_search.py`** - AI-powered search with FAISS vectors  
+- **`enhanced_semantic_search.py`** - Enhanced search with advanced features
 - **`ai_enhanced_search.py`** - Advanced AI features (OpenAI/HuggingFace)
-- **`video_processor/`** - Django app with web interface
+- **`rag_qa_system.py`** - RAG-based question answering
+- **`video_processor/`** - Django app with web interface and API
 - **`video_recall_project/`** - Django project settings
+
+## 🔌 API Access
+
+AskMyVideo provides a comprehensive REST API for programmatic access:
+
+- **Base URL**: `http://localhost:8000/api/`
+- **Interactive Documentation**: Visit `/api/docs/` for Swagger UI
+- **API Reference**: See [API Guide](docs/API_GUIDE.md) for complete reference
+
+### Quick API Example
+
+```bash
+# Search videos
+curl -X POST http://localhost:8000/api/search/ \
+  -H "Content-Type: application/json" \
+  -d '{"query": "motivation and success", "search_mode": "hybrid"}'
+```
 
 ## 🎯 Features
 
@@ -92,4 +146,24 @@ AskMyVideo understands context and meaning, not just exact word matches!
 - ✅ **Cost Effective** - Free tier AI with smart fallbacks
 - ✅ **Privacy Focused** - All processing can run locally
 
-Transform how you search and recall video content with **AskMyVideo** - where intelligence meets simplicity. 🚀 
+Transform how you search and recall video content with **AskMyVideo** - where intelligence meets simplicity. 🚀
+
+## 🚀 Quick Links
+
+- **Getting Started**: See [User Guide](docs/USER_GUIDE.md)
+- **API Documentation**: Visit `/api/docs/` or see [API Guide](docs/API_GUIDE.md)
+- **Development**: See [Developer Guide](docs/DEVELOPER_GUIDE.md)
+- **Architecture**: See [Architecture Documentation](docs/ARCHITECTURE.md)
+- **Search Details**: See [Search System](docs/SEARCH_SYSTEM.md)
+
+## 📊 Architecture Diagrams
+
+Visual representations of the system:
+
+- [System Architecture](docs/diagrams/system-architecture.md) - Overall system design
+- [Data Flow](docs/diagrams/data-flow.md) - Processing and search flows
+- [Search Architecture](docs/diagrams/search-architecture.md) - Search system design
+- [API Endpoints](docs/diagrams/api-endpoints.md) - API structure
+- [Database Schema](docs/diagrams/database-schema.md) - Data model
+
+All diagrams use Mermaid format and render automatically on GitHub/GitLab. 

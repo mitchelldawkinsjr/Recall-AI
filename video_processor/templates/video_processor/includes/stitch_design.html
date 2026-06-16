@@ -1,0 +1,166 @@
+{# Stitch light-theme tokens — source: project 12113312558662173038 #}
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        colors: {
+          "on-background": "#1a1c20",
+          "surface": "#f9f9fe",
+          "inverse-surface": "#2f3035",
+          "surface-bright": "#f9f9fe",
+          "surface-variant": "#e2e2e8",
+          "surface-container-highest": "#e2e2e8",
+          "surface-container-high": "#e8e8ed",
+          "surface-container-low": "#f3f3f9",
+          "surface-dim": "#dad9df",
+          "surface-container": "#eeedf3",
+          "surface-container-lowest": "#ffffff",
+          "outline": "#737781",
+          "outline-variant": "#c3c6d1",
+          "background": "#f9f9fe",
+          "primary": "#002753",
+          "on-primary": "#ffffff",
+          "primary-container": "#083d77",
+          "on-primary-container": "#83a9ea",
+          "primary-fixed": "#d6e3ff",
+          "primary-fixed-dim": "#a9c7ff",
+          "on-primary-fixed": "#001b3d",
+          "on-primary-fixed-variant": "#194781",
+          "inverse-primary": "#a9c7ff",
+          "surface-tint": "#365f9a",
+          "secondary": "#715c00",
+          "on-secondary": "#ffffff",
+          "secondary-container": "#ffdd67",
+          "on-secondary-container": "#766100",
+          "secondary-fixed": "#ffe17a",
+          "secondary-fixed-dim": "#e4c451",
+          "on-secondary-fixed": "#231b00",
+          "on-secondary-fixed-variant": "#554500",
+          "tertiary": "#411f00",
+          "on-tertiary": "#ffffff",
+          "tertiary-container": "#613100",
+          "tertiary-fixed": "#ffdcc4",
+          "tertiary-fixed-dim": "#ffb77f",
+          "on-tertiary-fixed": "#2f1500",
+          "on-tertiary-fixed-variant": "#6f3900",
+          "on-tertiary-container": "#eb9449",
+          "error": "#ba1a1a",
+          "on-error": "#ffffff",
+          "error-container": "#ffdad6",
+          "on-error-container": "#93000a",
+          "inverse-on-surface": "#f1f0f6",
+          "on-surface": "#1a1c20",
+          "on-surface-variant": "#434750",
+          "cream-bg": "#EBEBD3",
+          "luminous-cream": "#F4F4E4"
+        },
+        borderRadius: {
+          DEFAULT: "0.25rem",
+          lg: "0.5rem",
+          xl: "0.75rem",
+          full: "9999px"
+        },
+        spacing: {
+          "margin-mobile": "16px",
+          "margin-desktop": "48px",
+          xs: "8px",
+          sm: "16px",
+          md: "24px",
+          lg: "40px",
+          xl: "64px",
+          gutter: "24px",
+          base: "4px"
+        },
+        fontFamily: {
+          sans: ["Hanken Grotesk", "sans-serif"]
+        },
+        fontSize: {
+          "headline-xl": ["48px", { lineHeight: "56px", letterSpacing: "-0.02em", fontWeight: "700" }],
+          "headline-lg": ["32px", { lineHeight: "40px", letterSpacing: "-0.01em", fontWeight: "600" }],
+          "headline-md": ["24px", { lineHeight: "32px", fontWeight: "600" }],
+          "body-lg": ["18px", { lineHeight: "28px", fontWeight: "400" }],
+          "body-md": ["16px", { lineHeight: "24px", fontWeight: "400" }],
+          "body-sm": ["14px", { lineHeight: "20px", fontWeight: "400" }],
+          "label-lg": ["14px", { lineHeight: "20px", letterSpacing: "0.02em", fontWeight: "600" }],
+          "label-md": ["12px", { lineHeight: "16px", fontWeight: "500" }]
+        }
+      }
+    }
+  }
+</script>
+<style>
+    body {
+        font-family: 'Hanken Grotesk', sans-serif;
+        color: #1a1c20;
+    }
+    body.theme-cream {
+        background-color: #EBEBD3;
+    }
+    body.theme-surface {
+        background-color: #f9f9fe;
+    }
+    .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        vertical-align: middle;
+    }
+    .luminous-card {
+        background-color: #F4F4E4;
+        border: 1px solid rgba(0, 39, 83, 0.05);
+    }
+    .stat-card-gradient {
+        background: linear-gradient(135deg, #ffffff 0%, #f3f3f9 100%);
+    }
+    .video-card-hover:hover {
+        border-bottom: 2px solid #002753;
+    }
+    .glass-surface {
+        background: rgba(244, 244, 228, 0.85);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(0, 39, 83, 0.1);
+    }
+    .alert-success {
+        background-color: rgba(8, 61, 119, 0.08);
+        color: #083d77;
+        border: 1px solid rgba(8, 61, 119, 0.2);
+    }
+    .alert-error {
+        background-color: rgba(255, 218, 214, 0.5);
+        color: #93000a;
+        border: 1px solid rgba(186, 26, 26, 0.2);
+    }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: rgba(0, 39, 83, 0.1);
+        border-radius: 10px;
+    }
+    input[type=range]::-webkit-slider-runnable-track {
+        background: #002753;
+        height: 4px;
+        border-radius: 2px;
+    }
+    input[type=range]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        height: 16px;
+        width: 16px;
+        border-radius: 50%;
+        background: #002753;
+        margin-top: -6px;
+        cursor: pointer;
+    }
+    .upload-dashed-border {
+        border: 2px dashed rgba(0, 39, 83, 0.2);
+    }
+    .search-container-focus:focus-within {
+        transform: translateY(-2px);
+        transition: all 0.3s ease;
+    }
+    .smart-pulse {
+        animation: pulse-border 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    @keyframes pulse-border {
+        0%, 100% { border-color: rgba(0, 39, 83, 0.3); box-shadow: 0 0 0 0 rgba(0, 39, 83, 0.1); }
+        50% { border-color: rgba(0, 39, 83, 0.8); box-shadow: 0 0 15px 2px rgba(0, 39, 83, 0.15); }
+    }
+</style>

@@ -1,955 +1,294 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AskMyVideo - Enhanced AI Search</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .header {
-            text-align: center;
-            color: white;
-            margin-bottom: 40px;
-        }
-
-        .header h1 {
-            font-size: 3rem;
-            margin-bottom: 10px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-
-        .header .subtitle {
-            font-size: 1.2rem;
-            opacity: 0.9;
-            margin-bottom: 10px;
-        }
-
-        .ai-status {
-            display: inline-block;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            font-weight: 500;
-        }
-
-        .ai-status.available {
-            background: rgba(76, 175, 80, 0.2);
-            color: #4CAF50;
-            border: 1px solid rgba(76, 175, 80, 0.3);
-        }
-
-        .ai-status.unavailable {
-            background: rgba(255, 152, 0, 0.2);
-            color: #FF9800;
-            border: 1px solid rgba(255, 152, 0, 0.3);
-        }
-
-        .search-card {
-            background: white;
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
-        }
-
-        .search-form {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        .search-input-container {
-            position: relative;
-        }
-
-        .search-input {
-            width: 100%;
-            padding: 20px 60px 20px 20px;
-            border: 2px solid #e0e0e0;
-            border-radius: 15px;
-            font-size: 1.1rem;
-            transition: all 0.3s ease;
-            outline: none;
-        }
-
-        .search-input:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .search-btn {
-            position: absolute;
-            right: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
-            border-radius: 10px;
-            padding: 12px 20px;
-            color: white;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.3s ease;
-        }
-
-        .search-btn:hover {
-            transform: translateY(-50%) translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
-        }
-
-        .search-options {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-top: 20px;
-        }
-
-        .option-group {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 10px;
-        }
-
-        .option-group label {
-            display: block;
-            font-weight: 600;
-            margin-bottom: 8px;
-            color: #333;
-        }
-
-        select, input[type="range"], input[type="number"] {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 0.9rem;
-        }
-
-        .mode-buttons {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-
-        .mode-btn {
-            padding: 10px 20px;
-            border: 2px solid #e0e0e0;
-            background: white;
-            border-radius: 25px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            font-weight: 500;
-        }
-
-        .mode-btn.active {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-color: transparent;
-        }
-
-        .results-container {
-            margin-top: 30px;
-        }
-
-        .results-header {
-            background: white;
-            padding: 20px;
-            border-radius: 15px 15px 0 0;
-            border-bottom: 1px solid #e0e0e0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .results-content {
-            background: white;
-            border-radius: 0 0 15px 15px;
-            max-height: 70vh;
-            overflow-y: auto;
-        }
-
-        .result-item {
-            padding: 20px;
-            border-bottom: 1px solid #f0f0f0;
-            transition: all 0.3s ease;
-        }
-
-        .result-item:hover {
-            background: #f8f9fa;
-        }
-
-        .result-item:last-child {
-            border-bottom: none;
-        }
-
-        .result-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 10px;
-        }
-
-        .video-title {
-            font-weight: 600;
-            color: #333;
-            font-size: 1.1rem;
-        }
-
-        .confidence-badge {
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-size: 0.8rem;
-            font-weight: 600;
-        }
-
-        .confidence-high { background: #e8f5e8; color: #2e7d2e; }
-        .confidence-medium { background: #fff3e0; color: #f57c00; }
-        .confidence-low { background: #ffebee; color: #c62828; }
-
-        .result-text {
-            color: #666;
-            margin: 10px 0;
-            line-height: 1.6;
-        }
-
-        .result-metadata {
-            font-size: 0.9rem;
-            color: #888;
-            margin-top: 10px;
-        }
-        
-        .play-controls {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            margin-bottom: 10px;
-        }
-        
-        .metadata-info {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-        }
-        
-        .play-button {
-            background: var(--secondary-color);
-            color: white;
-            border: none;
-            border-radius: 25px;
-            padding: 8px 16px;
-            font-size: 0.9rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            box-shadow: 0 2px 8px rgba(52, 152, 219, 0.3);
-        }
-        
-        .play-button:hover {
-            background: #2980b9;
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(52, 152, 219, 0.4);
-        }
-        
-        .play-button:active {
-            transform: translateY(0);
-        }
-
-        .timestamp-link {
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 500;
-        }
-
-        .timestamp-link:hover {
-            text-decoration: underline;
-        }
-
-        .topic-tags {
-            display: flex;
-            gap: 5px;
-            flex-wrap: wrap;
-            margin-top: 10px;
-        }
-
-        .topic-tag {
-            background: #e3f2fd;
-            color: #1976d2;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 0.8rem;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #666;
-        }
-
-        .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .error {
-            background: #ffebee;
-            color: #c62828;
-            padding: 15px;
-            border-radius: 10px;
-            margin: 20px 0;
-        }
-
-        .qa-section {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            margin-top: 20px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.05);
-        }
-
-        .qa-toggle {
-            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 25px;
-            cursor: pointer;
-            font-weight: 600;
-            margin-bottom: 20px;
-        }
-
-        .qa-input {
-            width: 100%;
-            padding: 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 10px;
-            margin-bottom: 15px;
-            font-size: 1rem;
-        }
-
-        .qa-answer {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 10px;
-            border-left: 4px solid #4caf50;
-            margin-top: 15px;
-        }
-
-        .nav-links {
-            text-align: center;
-            margin-top: 30px;
-        }
-
-        .nav-links a {
-            color: white;
-            text-decoration: none;
-            margin: 0 15px;
-            padding: 10px 20px;
-            border: 2px solid rgba(255,255,255,0.3);
-            border-radius: 25px;
-            transition: all 0.3s ease;
-        }
-
-        .nav-links a:hover {
-            background: rgba(255,255,255,0.1);
-            border-color: rgba(255,255,255,0.6);
-        }
-
-        @media (max-width: 768px) {
-            .container { padding: 10px; }
-            .search-card { padding: 20px; }
-            .header h1 { font-size: 2rem; }
-            .search-options { grid-template-columns: 1fr; }
-            .mode-buttons { justify-content: center; }
-        }
-
-        /* Video lightbox styles */
-        .video-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.9);
-            z-index: 10000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-        }
-
-        .video-modal {
-            background: white;
-            border-radius: 15px;
-            padding: 20px;
-            max-width: 95vw;
-            max-height: 95vh;
-            overflow: auto;
-            position: relative;
-        }
-
-        .video-modal iframe,
-        .video-modal video {
-            max-width: 100%;
-        }
-
-        .timestamp-link {
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 600;
-            cursor: pointer;
-            padding: 4px 8px;
-            border-radius: 4px;
-            transition: all 0.3s ease;
-        }
-
-        .timestamp-link:hover {
-            background: rgba(102, 126, 234, 0.1);
-            color: #5a67d8;
-        }
-
-        @media (max-width: 768px) {
-            .video-modal {
-                padding: 15px;
-                max-width: 98vw;
-                max-height: 98vh;
-            }
-            
-            .video-modal iframe,
-            .video-modal video {
-                width: 100% !important;
-                height: 450px !important;
-                min-height: 450px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🧠 AskMyVideo Enhanced AI Search</h1>
-            <p class="subtitle">Advanced semantic search with AI-powered question answering</p>
-            <div class="ai-status {% if phase2_available %}available{% else %}unavailable{% endif %}">
-                {% if phase2_available %}
-                    ✅ Phase 2 AI: Enhanced capabilities active
-                {% else %}
-                    ⚠️ Phase 2 AI: Fallback mode (basic search only)
-                {% endif %}
-            </div>
-        </div>
-
-        <div class="search-card">
-            <form class="search-form" id="searchForm">
-                <div class="search-input-container">
-                    <input type="text" id="searchQuery" class="search-input" 
-                           placeholder="Ask anything about your videos... (e.g., 'How do I improve my communication skills?')" 
-                           required>
-                    <button type="submit" class="search-btn">🔍 Search</button>
-                </div>
-
-                <div class="search-options">
-                    <div class="option-group">
-                        <label>Search Mode:</label>
-                        <div class="mode-buttons">
-                            <button type="button" class="mode-btn active" data-mode="enhanced">Enhanced</button>
-                            <button type="button" class="mode-btn" data-mode="semantic">Semantic</button>
-                            <button type="button" class="mode-btn" data-mode="hybrid">Hybrid</button>
-                        </div>
-                    </div>
-
-                    <div class="option-group">
-                        <label for="maxResults">Max Results:</label>
-                        <select id="maxResults">
-                            <option value="10">10 results</option>
-                            <option value="20">20 results</option>
-                            <option value="50">50 results</option>
-                        </select>
-                    </div>
-
-                    <div class="option-group">
-                        <label for="minSimilarity">Similarity Threshold:</label>
-                        <input type="range" id="minSimilarity" min="0" max="1" step="0.1" value="0.3">
-                        <span id="similarityValue">0.3</span>
-                    </div>
-
-                    <div class="option-group">
-                        <label for="filterTopics">Filter by Topics:</label>
-                        <input type="text" id="filterTopics" placeholder="e.g., health, technology">
-                    </div>
-                </div>
-            </form>
-        </div>
-
-        <div class="qa-section" id="qaSection" style="display: none;">
-            <button class="qa-toggle" id="qaToggle">🤖 Ask AI Question</button>
-            <div id="qaContent" style="display: none;">
-                <input type="text" id="qaQuestion" class="qa-input" 
-                       placeholder="Ask a specific question about your video content...">
-                <button onclick="askQuestion()" class="search-btn" style="position: static; transform: none;">Ask Question</button>
-                <div id="qaAnswer"></div>
-            </div>
-        </div>
-
-        <div id="resultsContainer" class="results-container" style="display: none;">
-            <div class="results-header">
-                <h3 id="resultsTitle">Search Results</h3>
-                <div id="resultsCount"></div>
-            </div>
-            <div class="results-content" id="resultsContent"></div>
-        </div>
-
-        <div class="nav-links">
-                            <a href="{% url 'private_search_interface' %}">← Basic Search</a>
-            <a href="{% url 'library' %}">📚 Video Library</a>
-            <a href="/admin/">⚙️ Admin</a>
+{% extends "video_processor/base.html" %}
+
+{% block title %}Recall AI | Enhanced Search{% endblock %}
+
+{% block topbar %}{% endblock %}
+
+{% block body %}
+{% include "video_processor/includes/sidebar.html" %}
+<header class="fixed top-0 right-0 left-0 lg:left-[280px] h-16 bg-surface border-b border-outline-variant/10 flex justify-between items-center px-margin-mobile md:px-gutter z-40">
+    <div class="flex items-center flex-1 max-w-xl">
+        <div class="relative w-full focus-within:ring-2 ring-primary ring-opacity-20 rounded-lg">
+            <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant">search</span>
+            <input id="searchQuery" type="text"
+                   class="w-full bg-surface-container-low border-none rounded-lg py-2 pl-10 pr-4 text-on-surface focus:ring-0 font-body-md placeholder:text-outline"
+                   placeholder="Search across all video transcripts..."
+                   aria-label="Search across all video transcripts">
         </div>
     </div>
-
-    <script>
-        let currentSearchMode = 'enhanced';
-        let currentResults = [];
-
-        document.addEventListener('DOMContentLoaded', function() {
-            // Initialize similarity slider
-            const slider = document.getElementById('minSimilarity');
-            const value = document.getElementById('similarityValue');
-            slider.addEventListener('input', function() {
-                value.textContent = this.value;
-            });
-
-            // Mode button handlers
-            document.querySelectorAll('.mode-btn').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
-                    this.classList.add('active');
-                    currentSearchMode = this.dataset.mode;
-                });
-            });
-
-            // QA toggle
-            document.getElementById('qaToggle').addEventListener('click', function() {
-                const content = document.getElementById('qaContent');
-                content.style.display = content.style.display === 'none' ? 'block' : 'none';
-            });
-
-            // Search form handler
-            document.getElementById('searchForm').addEventListener('submit', function(e) {
-                e.preventDefault();
-                performSearch();
-            });
-
-            // Show QA section if Phase 2 is available
-            {% if phase2_available %}
-            document.getElementById('qaSection').style.display = 'block';
+    <div class="flex items-center gap-md ml-md shrink-0">
+        <button type="button" class="text-on-surface-variant hover:bg-surface-container-low p-2 rounded-full transition-colors hidden sm:block" title="Notifications">
+            <span class="material-symbols-outlined">notifications</span>
+        </button>
+        <button type="button" class="text-on-surface-variant hover:bg-surface-container-low p-2 rounded-full transition-colors hidden sm:block" title="Settings">
+            <span class="material-symbols-outlined">settings</span>
+        </button>
+        {% if user.is_authenticated %}
+        <div class="w-8 h-8 rounded-full bg-primary-container flex items-center justify-center text-on-primary-container font-bold text-xs overflow-hidden">{{ user.username|slice:":2"|upper }}</div>
+        {% endif %}
+    </div>
+</header>
+<main class="ml-0 lg:ml-[280px] mt-16 flex min-h-[calc(100vh-64px)] pb-16 lg:pb-0">
+        <aside class="hidden md:block w-80 bg-luminous-cream p-6 border-r border-outline-variant/10 sticky top-16 h-[calc(100vh-64px)] overflow-y-auto custom-scrollbar" aria-label="Advanced search filters">
+            <h2 class="text-headline-md text-primary mb-8">Advanced Filters</h2>
+            <div class="mb-8">
+                <div class="flex justify-between items-center mb-4">
+                    <label for="minSimilarity" class="text-label-lg text-on-surface">Similarity Threshold</label>
+                    <span class="text-primary font-bold" id="similarityValue" aria-live="polite">85%</span>
+                </div>
+                <input id="minSimilarity" type="range" min="0" max="1" step="0.05" value="0.85" class="w-full accent-primary">
+            </div>
+            <label for="diversifyResults" class="mb-8 flex items-center justify-between cursor-pointer">
+                <span class="text-label-lg text-on-surface">Diversify Results</span>
+                <span class="relative inline-flex items-center">
+                    <input id="diversifyResults" type="checkbox" checked class="sr-only peer">
+                    <div class="w-11 h-6 bg-outline-variant/30 rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-5" aria-hidden="true"></div>
+                </span>
+            </label>
+            <div class="mb-8">
+                <label for="maxPerVideo" class="text-label-lg text-on-surface block mb-2">Max Results per Video</label>
+                <input id="maxPerVideo" type="number" value="3" min="1" max="10"
+                       class="w-full bg-surface-container-lowest border border-outline/10 rounded-lg py-2 px-3 focus:border-primary outline-none">
+            </div>
+            <div class="mb-8">
+                <label for="maxResults" class="text-label-lg text-on-surface block mb-2">Max Total Results</label>
+                <input id="maxResults" type="number" value="20" min="1" max="100"
+                       class="w-full bg-surface-container-lowest border border-outline/10 rounded-lg py-2 px-3 focus:border-primary outline-none">
+            </div>
+            <div class="mb-8">
+                <label for="filterTopics" class="text-label-lg text-on-surface block mb-2">Filter by Topics</label>
+                <input id="filterTopics" type="text" placeholder="e.g., architecture, interviews"
+                       class="w-full bg-surface-container-lowest border border-outline/10 rounded-lg py-2 px-3 focus:border-primary outline-none">
+            </div>
+            <div class="mb-8">
+                <label class="text-label-lg text-on-surface block mb-2">Search Mode</label>
+                <div class="flex flex-wrap gap-2">
+                    <button type="button" class="mode-btn px-3 py-1.5 rounded-full bg-primary text-on-primary text-xs font-semibold" data-mode="enhanced">Enhanced</button>
+                    <button type="button" class="mode-btn px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-semibold" data-mode="semantic">Semantic</button>
+                    <button type="button" class="mode-btn px-3 py-1.5 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-semibold" data-mode="hybrid">Hybrid</button>
+                </div>
+            </div>
+            <button type="button" id="searchBtn"
+                    class="w-full py-2 bg-primary text-on-primary rounded-lg text-label-lg font-bold hover:opacity-90 transition-opacity mb-3">
+                Search
+            </button>
+            <button type="button" id="resetFilters"
+                    class="w-full py-2 border border-outline-variant/30 text-primary rounded-lg text-label-lg font-bold hover:bg-surface-container-low transition-colors">
+                Reset Filters
+            </button>
+            {% if enhanced_available %}
+            <p class="text-label-md text-primary-container flex items-center gap-1 mt-6"><span class="material-symbols-outlined text-sm">check_circle</span> Enhanced AI available</p>
+            {% else %}
+            <p class="text-label-md text-on-surface-variant mt-6">Enhanced AI unavailable — using standard search.</p>
             {% endif %}
+        </aside>
+
+        <section class="flex-1 p-gutter overflow-y-auto">
+            {% block enhanced_page_heading %}<h1 class="sr-only">Enhanced Search</h1>{% endblock %}
+            {% block enhanced_profile_header %}{% endblock %}
+            {% include "video_processor/includes/messages.html" %}
+            <div class="flex justify-between items-end mb-8">
+                <div>
+                    <h2 class="text-headline-lg text-primary">Search Results</h2>
+                    <p class="text-on-surface-variant text-body-md" id="resultsCount">Enter a query to find exact moments.</p>
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" id="gridViewBtn" class="p-2 bg-surface-container-high rounded-lg text-primary" title="Grid view">
+                        <span class="material-symbols-outlined text-[20px]">grid_view</span>
+                    </button>
+                    <button type="button" id="listViewBtn" class="p-2 bg-surface text-on-surface-variant rounded-lg" title="List view">
+                        <span class="material-symbols-outlined text-[20px]">view_list</span>
+                    </button>
+                </div>
+            </div>
+
+            <div id="resultsContainer" class="hidden">
+                <div id="resultsContent" class="grid grid-cols-1 xl:grid-cols-2 gap-gutter"></div>
+                <div class="text-center mt-lg hidden" id="loadMoreWrap">
+                    <button type="button" id="loadMoreBtn"
+                            class="px-8 py-3 bg-primary text-on-primary font-bold rounded-lg hover:bg-primary-container transition-all inline-flex items-center gap-3 active:scale-95 shadow-lg shadow-primary/10">
+                        <span class="material-symbols-outlined">expand_more</span>
+                        Load More Results
+                    </button>
+                </div>
+            </div>
+
+            <div id="emptyState" class="luminous-card rounded-xl p-xl text-center text-on-surface-variant">
+                <span class="material-symbols-outlined text-[48px] text-primary/30 mb-md">search</span>
+                <p>Enter a query above to search your indexed video content.</p>
+            </div>
+        </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentSearchMode = 'enhanced';
+let currentView = 'grid';
+let allResults = [];
+let displayedCount = 0;
+const PAGE_SIZE = 8;
+const searchUsername = {% if username %}'{{ username }}'{% else %}null{% endif %};
+
+document.getElementById('minSimilarity').addEventListener('input', function() {
+    document.getElementById('similarityValue').textContent = Math.round(this.value * 100) + '%';
+});
+
+document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.mode-btn').forEach(b => {
+            b.classList.remove('bg-primary', 'text-on-primary');
+            b.classList.add('bg-surface-container-high', 'text-on-surface-variant');
         });
+        this.classList.add('bg-primary', 'text-on-primary');
+        this.classList.remove('bg-surface-container-high', 'text-on-surface-variant');
+        currentSearchMode = this.dataset.mode;
+    });
+});
 
-        async function performSearch() {
-            const query = document.getElementById('searchQuery').value.trim();
-            if (!query) return;
+document.getElementById('resetFilters').addEventListener('click', () => {
+    document.getElementById('minSimilarity').value = 0.85;
+    document.getElementById('similarityValue').textContent = '85%';
+    document.getElementById('diversifyResults').checked = true;
+    document.getElementById('maxPerVideo').value = 3;
+    document.getElementById('maxResults').value = 20;
+    document.getElementById('filterTopics').value = '';
+    currentSearchMode = 'enhanced';
+    document.querySelectorAll('.mode-btn').forEach(b => {
+        b.classList.remove('bg-primary', 'text-on-primary');
+        b.classList.add('bg-surface-container-high', 'text-on-surface-variant');
+    });
+    document.querySelector('.mode-btn[data-mode="enhanced"]').classList.add('bg-primary', 'text-on-primary');
+    document.querySelector('.mode-btn[data-mode="enhanced"]').classList.remove('bg-surface-container-high', 'text-on-surface-variant');
+});
 
-            const maxResults = document.getElementById('maxResults').value;
-            const minSimilarity = document.getElementById('minSimilarity').value;
-            const filterTopics = document.getElementById('filterTopics').value.trim();
+document.getElementById('gridViewBtn').addEventListener('click', () => setView('grid'));
+document.getElementById('listViewBtn').addEventListener('click', () => setView('list'));
+document.getElementById('loadMoreBtn').addEventListener('click', () => renderMoreResults());
+document.getElementById('searchBtn').addEventListener('click', performSearch);
+document.getElementById('searchQuery').addEventListener('keypress', e => { if (e.key === 'Enter') performSearch(); });
 
-            const resultsContainer = document.getElementById('resultsContainer');
-            const resultsContent = document.getElementById('resultsContent');
-            
-            // Show loading
-            resultsContainer.style.display = 'block';
-            resultsContent.innerHTML = `
-                <div class="loading">
-                    <div class="spinner"></div>
-                    <p>Searching with enhanced AI capabilities...</p>
-                </div>
-            `;
+function setView(view) {
+    currentView = view;
+    const gridBtn = document.getElementById('gridViewBtn');
+    const listBtn = document.getElementById('listViewBtn');
+    const content = document.getElementById('resultsContent');
+    if (view === 'grid') {
+        gridBtn.className = 'p-2 bg-surface-container-high rounded-lg text-primary';
+        listBtn.className = 'p-2 bg-surface text-on-surface-variant rounded-lg';
+        content.className = 'grid grid-cols-1 xl:grid-cols-2 gap-gutter';
+    } else {
+        listBtn.className = 'p-2 bg-surface-container-high rounded-lg text-primary';
+        gridBtn.className = 'p-2 bg-surface text-on-surface-variant rounded-lg';
+        content.className = 'flex flex-col gap-gutter';
+    }
+    if (allResults.length) renderResultsSlice(0, displayedCount);
+}
 
-            try {
-                const endpoint = currentSearchMode === 'enhanced' ? 
-                    '/api/enhanced-search/' : '/api/search/';
-                
-                const payload = {
-                    query: query,
-                    k: parseInt(maxResults),
-                    min_similarity: parseFloat(minSimilarity)
-                };
+function renderResultCard(result) {
+    const confidence = Math.round((result.confidence || result.semantic_similarity || result.relevance_score || 0) * 100);
+    const topics = (result.topic_tags || []).map(t =>
+        `<span class="px-2 py-0.5 bg-surface-container-high rounded text-[10px] font-medium text-on-surface-variant uppercase">${t}</span>`
+    ).join('');
+    const layout = currentView === 'list' ? 'flex-row' : 'flex-col md:flex-row';
+    return `
+    <div class="group bg-luminous-cream rounded-xl p-4 border border-outline-variant/5 hover:border-primary/20 transition-all flex ${layout} gap-4 relative overflow-hidden">
+        <div class="absolute top-4 right-4 z-10">
+            <span class="px-2 py-1 bg-primary text-on-primary text-[10px] font-bold rounded shadow-sm">${confidence}% MATCH</span>
+        </div>
+        <div class="w-full ${currentView === 'list' ? 'md:w-32' : 'md:w-56'} h-32 flex-shrink-0 rounded-lg overflow-hidden bg-surface-dim relative flex items-center justify-center">
+            <span class="material-symbols-outlined text-primary text-4xl opacity-50 group-hover:opacity-0 transition-opacity">play_circle</span>
+            <div class="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <button type="button" onclick="playSegment('${result.video_id}', ${result.start_time})"
+                        class="material-symbols-outlined text-white text-4xl">play_circle</button>
+            </div>
+        </div>
+        <div class="flex flex-col justify-between flex-1">
+            <div>
+                <h4 class="text-headline-md text-primary mb-2 leading-tight">${result.video_name || result.video_title}</h4>
+                <p class="text-body-sm text-on-surface-variant line-clamp-2 italic mb-2">"${result.text}"</p>
+            </div>
+            <div class="flex flex-wrap gap-2 items-center">
+                <span class="px-2 py-0.5 bg-surface-container-high rounded text-[10px] font-medium text-on-surface-variant">${result.timestamp_formatted || formatTime(result.start_time)}</span>
+                ${topics}
+            </div>
+        </div>
+    </div>`;
+}
 
-                if (filterTopics) {
-                    payload.filter_topics = filterTopics.split(',').map(t => t.trim());
-                }
+function renderResultsSlice(start, end) {
+    const slice = allResults.slice(start, end);
+    const content = document.getElementById('resultsContent');
+    if (start === 0) {
+        content.innerHTML = slice.map(renderResultCard).join('');
+    } else {
+        content.insertAdjacentHTML('beforeend', slice.map(renderResultCard).join(''));
+    }
+    displayedCount = end;
+    document.getElementById('loadMoreWrap').classList.toggle('hidden', displayedCount >= allResults.length);
+}
 
-                const response = await fetch(endpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken')
-                    },
-                    body: JSON.stringify(payload)
-                });
+function renderMoreResults() {
+    renderResultsSlice(displayedCount, Math.min(displayedCount + PAGE_SIZE, allResults.length));
+}
 
-                const data = await response.json();
+async function performSearch() {
+    const query = document.getElementById('searchQuery').value.trim();
+    if (!query) return;
 
-                if (data.status === 'success') {
-                    displayResults(data, query);
-                } else {
-                    showError(data.message || 'Search failed');
-                }
-            } catch (error) {
-                console.error('Search error:', error);
-                showError('Network error occurred');
-            }
+    const resultsContainer = document.getElementById('resultsContainer');
+    const resultsContent = document.getElementById('resultsContent');
+    const emptyState = document.getElementById('emptyState');
+    const resultsCount = document.getElementById('resultsCount');
+
+    emptyState.classList.add('hidden');
+    resultsContainer.classList.remove('hidden');
+    resultsContent.innerHTML = '<div class="col-span-2 luminous-card rounded-xl p-xl text-center">Searching with enhanced AI...</div>';
+    document.getElementById('loadMoreWrap').classList.add('hidden');
+
+    try {
+        const payload = {
+            query,
+            k: parseInt(document.getElementById('maxResults').value) || 20,
+            min_similarity: parseFloat(document.getElementById('minSimilarity').value),
+            diversify: document.getElementById('diversifyResults').checked,
+            max_per_video: parseInt(document.getElementById('maxPerVideo').value) || 3,
+            search_type: currentSearchMode,
+            include_context: true
+        };
+        const topics = document.getElementById('filterTopics').value.trim();
+        if (topics) payload.filter_topics = topics.split(',').map(t => t.trim());
+        if (searchUsername) payload.username = searchUsername;
+
+        const response = await fetch('/api/advanced-search/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+
+        if (!(data.success || data.status === 'success')) {
+            throw new Error(data.message || data.error || 'Search failed');
         }
 
-        function displayResults(data, query) {
-            const resultsContent = document.getElementById('resultsContent');
-            const resultsTitle = document.getElementById('resultsTitle');
-            const resultsCount = document.getElementById('resultsCount');
+        let countText = `Showing ${data.total_results} matches`;
+        if (data.unique_videos) countText += ` from ${data.unique_videos} videos`;
+        resultsCount.textContent = countText + ` for "${query}"`;
 
-            resultsTitle.textContent = `Results for "${query}"`;
-            resultsCount.textContent = `${data.results.length} results`;
-
-            if (data.results.length === 0) {
-                resultsContent.innerHTML = `
-                    <div class="loading">
-                        <p>No results found. Try different keywords or adjust the similarity threshold.</p>
-                    </div>
-                `;
-                return;
-            }
-
-            let html = '';
-            data.results.forEach(result => {
-                const confidence = result.confidence || result.semantic_similarity || 0;
-                const confidenceClass = confidence > 0.7 ? 'confidence-high' : 
-                                      confidence > 0.4 ? 'confidence-medium' : 'confidence-low';
-                
-                const topics = result.topic_tags || [];
-                const topicHtml = topics.map(tag => 
-                    `<span class="topic-tag">${tag}</span>`
-                ).join('');
-
-                html += `
-                    <div class="result-item">
-                        <div class="result-header">
-                            <div class="video-title">${result.video_title}</div>
-                            <div class="confidence-badge ${confidenceClass}">
-                                ${Math.round(confidence * 100)}% match
-                            </div>
-                        </div>
-                        <div class="result-text">${result.text}</div>
-                        <div class="result-metadata">
-                            <div class="play-controls">
-                                <button class="play-button" onclick="playSegment('${result.video_id}', ${result.start_time})" title="Play video at this timestamp">
-                                    ▶️ Play
-                                </button>
-                                <span class="timestamp-link" onclick="playSegment('${result.video_id}', ${result.start_time})">
-                                    ⏱️ ${result.timestamp_formatted || formatTime(result.start_time)}
-                                </span>
-                            </div>
-                            <div class="metadata-info">
-                                <span>Duration: ${formatTime(result.end_time - result.start_time)}</span>
-                                ${result.semantic_similarity ? `<span>Similarity: ${Math.round(result.semantic_similarity * 100)}%</span>` : ''}
-                            </div>
-                        </div>
-                        ${topicHtml ? `<div class="topic-tags">${topicHtml}</div>` : ''}
-                    </div>
-                `;
-            });
-
-            resultsContent.innerHTML = html;
-            currentResults = data.results;
+        if (!data.results.length) {
+            allResults = [];
+            resultsContent.innerHTML = '<div class="col-span-2 luminous-card rounded-xl p-xl text-center">No results found. Try adjusting filters.</div>';
+            return;
         }
 
-        async function askQuestion() {
-            const question = document.getElementById('qaQuestion').value.trim();
-            if (!question) return;
+        allResults = data.results;
+        displayedCount = 0;
+        renderResultsSlice(0, Math.min(PAGE_SIZE, allResults.length));
+    } catch (error) {
+        allResults = [];
+        resultsContent.innerHTML = `<div class="col-span-2 rounded-xl p-md alert-error">${error.message}</div>`;
+    }
+}
 
-            const answerDiv = document.getElementById('qaAnswer');
-            answerDiv.innerHTML = `
-                <div class="loading">
-                    <div class="spinner"></div>
-                    <p>AI is thinking about your question...</p>
-                </div>
-            `;
-
-            try {
-                const response = await fetch('/api/rag-qa/', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCookie('csrftoken')
-                    },
-                    body: JSON.stringify({
-                        question: question,
-                        method: 'auto',
-                        include_sources: true
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.status === 'success') {
-                    let sourcesHtml = '';
-                    if (data.sources && data.sources.length > 0) {
-                        sourcesHtml = '<h4>Sources:</h4>';
-                        data.sources.forEach(source => {
-                            sourcesHtml += `
-                                <div style="margin: 10px 0; padding: 15px; background: #f0f0f0; border-radius: 8px;">
-                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                        <strong>${source.video_title}</strong>
-                                        <div style="display: flex; gap: 10px; align-items: center;">
-                                            <button class="play-button" onclick="playSegment('${source.video_id}', ${source.start_time})" title="Play video at this timestamp">
-                                                ▶️ Play
-                                            </button>
-                                            <span class="timestamp-link" onclick="playSegment('${source.video_id}', ${source.start_time})" style="display: inline;">
-                                                ⏱️ ${formatTime(source.start_time)}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <em>${source.text.substring(0, 200)}...</em>
-                                </div>
-                            `;
-                        });
-                    }
-
-                    answerDiv.innerHTML = `
-                        <div class="qa-answer">
-                            <h4>AI Answer:</h4>
-                            <p><strong>${data.answer}</strong></p>
-                            <div style="margin-top: 15px; font-size: 0.9rem; color: #666;">
-                                Confidence: ${Math.round(data.confidence * 100)}% | 
-                                Method: ${data.method} | 
-                                Processing time: ${data.processing_time}ms
-                            </div>
-                            ${sourcesHtml}
-                        </div>
-                    `;
-                } else {
-                    showError(data.message || 'Question answering failed', answerDiv);
-                }
-            } catch (error) {
-                console.error('QA error:', error);
-                showError('Network error occurred', answerDiv);
-            }
-        }
-
-        function showError(message, container = null) {
-            const errorHtml = `
-                <div class="error">
-                    <strong>Error:</strong> ${message}
-                </div>
-            `;
-            
-            if (container) {
-                container.innerHTML = errorHtml;
-            } else {
-                document.getElementById('resultsContent').innerHTML = errorHtml;
-                document.getElementById('resultsContainer').style.display = 'block';
-            }
-        }
-
-        function formatTime(seconds) {
-            const mins = Math.floor(seconds / 60);
-            const secs = Math.floor(seconds % 60);
-            return `${mins}:${secs.toString().padStart(2, '0')}`;
-        }
-
-        async function playSegment(videoId, timestamp) {
-            // Create loading overlay first
-            const overlay = document.createElement('div');
-            overlay.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0,0,0,0.9);
-                z-index: 10000;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                flex-direction: column;
-            `;
-            
-            overlay.innerHTML = `
-                <div style="background: white; border-radius: 15px; padding: 40px; text-align: center;">
-                    <div style="font-size: 2rem; margin-bottom: 20px;">🔄</div>
-                    <p>Loading video player...</p>
-                </div>
-            `;
-            
-            overlay.className = 'video-overlay';
-            document.body.appendChild(overlay);
-            
-            try {
-                // Fetch video details
-                const response = await fetch(`/api/video/${videoId}/`);
-                const videoData = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(videoData.error || 'Failed to load video details');
-                }
-                
-                // Check if it's a YouTube video using the improved API response
-                const isYouTube = videoData.is_youtube;
-                
-                let playerHTML = '';
-                if (isYouTube) {
-                    // Use the YouTube video ID from the API
-                    const youtubeId = videoData.youtube_video_id;
-                    if (youtubeId) {
-                        playerHTML = `
-                            <iframe 
-                                width="800" 
-                                height="450" 
-                                src="https://www.youtube.com/embed/${youtubeId}?start=${Math.floor(timestamp)}&autoplay=1" 
-                                frameborder="0" 
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-                                allowfullscreen
-                                style="border-radius: 8px;">
-                            </iframe>
-                            <div style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 8px; text-align: center;">
-                                <span style="color: #e74c3c; font-weight: bold;">📺 YouTube Video</span> - 
-                                Starting at ${formatTime(timestamp)}
-                                <div style="margin-top: 8px;">
-                                    <a href="https://www.youtube.com/watch?v=${youtubeId}&t=${Math.floor(timestamp)}s" target="_blank" 
-                                       style="color: #3498db; text-decoration: none; font-size: 0.9rem;">
-                                        🔗 Open on YouTube
-                                    </a>
-                                </div>
-                            </div>
-                        `;
-                    } else {
-                        // True fallback - very rare case where YouTube video ID cannot be extracted
-                        playerHTML = `
-                            <div style="background: #f8f9fa; padding: 40px; border-radius: 8px; text-align: center; border: 2px dashed #e74c3c;">
-                                <div style="font-size: 3rem; margin-bottom: 20px;">📺</div>
-                                <h3 style="color: #e74c3c; margin-bottom: 15px;">YouTube Video</h3>
-                                <p style="color: #7f8c8d; margin-bottom: 20px;">
-                                    This YouTube video's ID could not be extracted from the filename.<br>
-                                    The video file has been optimized and removed to save storage space.
-                                </p>
-                                <p style="color: #2c3e50; font-weight: bold;">
-                                    Segment starts at: ${formatTime(timestamp)}
-                                </p>
-                                <div style="margin-top: 20px; padding: 15px; background: #e8f4f8; border-radius: 8px;">
-                                    <p style="color: #34495e; margin: 0; font-size: 0.9rem;">
-                                        💡 <strong>Note:</strong> Search functionality is still available for this video's transcript.
-                                    </p>
-                                </div>
-                            </div>
-                        `;
-                    }
-                } else {
-                    // Local video file
-                    playerHTML = `
-                        <video 
-                            width="800" 
-                            height="450" 
-                            controls 
-                            autoplay
-                            style="border-radius: 8px;"
-                            onloadedmetadata="this.currentTime=${timestamp}">
-                            <source src="/video/${videoId}/" type="video/mp4">
-                            Your browser does not support the video tag.
-                        </video>
-                        <div style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 8px; text-align: center;">
-                            <span style="color: #27ae60; font-weight: bold;">💾 Local Video</span> - 
-                            Starting at ${formatTime(timestamp)}
-                        </div>
-                    `;
-                }
-                
-                // Update overlay with video player
-                overlay.innerHTML = `
-                    <div class="video-modal">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                            <h3 style="margin: 0; color: #2c3e50;">🎬 ${videoData.video_name}</h3>
-                            <button onclick="closeVideoPlayer()" style="background: #e74c3c; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; font-size: 1.2rem; font-weight: bold;">×</button>
-                        </div>
-                        <div style="text-align: center;">
-                            ${playerHTML}
-                        </div>
-                        <div style="margin-top: 20px; text-align: center;">
-                            <button onclick="closeVideoPlayer()" style="background: #95a5a6; color: white; padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer;">
-                                Close Player
-                            </button>
-                        </div>
-                    </div>
-                `;
-                
-            } catch (error) {
-                console.error('Error loading video:', error);
-                overlay.innerHTML = `
-                    <div style="background: white; border-radius: 15px; padding: 40px; text-align: center;">
-                        <div style="font-size: 2rem; margin-bottom: 20px; color: #e74c3c;">❌</div>
-                        <h3 style="color: #e74c3c; margin-bottom: 15px;">Error Loading Video</h3>
-                        <p style="color: #7f8c8d; margin-bottom: 20px;">${error.message}</p>
-                        <button onclick="closeVideoPlayer()" style="background: #95a5a6; color: white; padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer;">
-                            Close
-                        </button>
-                    </div>
-                `;
-            }
-            
-            // Close on background click
-            overlay.addEventListener('click', function(e) {
-                if (e.target === overlay) {
-                    closeVideoPlayer();
-                }
-            });
-        }
-        
-        function closeVideoPlayer() {
-            const overlay = document.querySelector('.video-overlay');
-            if (overlay) {
-                overlay.remove();
-            }
-        }
-
-        function getCookie(name) {
-            let cookieValue = null;
-            if (document.cookie && document.cookie !== '') {
-                const cookies = document.cookie.split(';');
-                for (let i = 0; i < cookies.length; i++) {
-                    const cookie = cookies[i].trim();
-                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                        break;
-                    }
-                }
-            }
-            return cookieValue;
-        }
-    </script>
-</body>
-</html> 
+</script>
+{% endblock %}

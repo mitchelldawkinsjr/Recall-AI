@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AskMyVideo Architecture Diagrams</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #555;
+            margin-top: 40px;
+            border-bottom: 2px solid #ddd;
+            padding-bottom: 5px;
+        }
+        .diagram-container {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            position: relative;
+            overflow-x: auto;
+        }
+        .mermaid {
+            text-align: center;
+            overflow: auto;
+        }
+        .mermaid svg {
+            max-width: 100%;
+            height: auto;
+        }
+        /* Make API diagram larger in normal view too */
+        #api-diagram {
+            min-width: 100%;
+            overflow-x: auto;
+        }
+        #api-diagram svg {
+            min-width: 1000px;
+        }
+        .fullscreen-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            transition: background 0.3s;
+        }
+        .fullscreen-btn:hover {
+            background: #45a049;
+        }
+        .fullscreen-btn:active {
+            transform: scale(0.95);
+        }
+        .fullscreen-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 9999;
+            overflow: auto;
+            padding: 20px;
+        }
+        .fullscreen-overlay.active {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .fullscreen-content {
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            max-width: 98%;
+            max-height: 98%;
+            overflow: auto;
+            position: relative;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            width: 100%;
+        }
+        .fullscreen-content h3 {
+            margin-top: 0;
+            color: #333;
+            border-bottom: 2px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        .fullscreen-content .mermaid {
+            min-width: 1200px;
+            min-height: 800px;
+            width: 100%;
+        }
+        .fullscreen-content .mermaid svg {
+            width: 100% !important;
+            height: auto !important;
+            max-width: none !important;
+        }
+        /* Special sizing for API diagram */
+        #api-diagram svg {
+            min-width: 1200px !important;
+            width: 100% !important;
+            transform: scale(1.2);
+            transform-origin: top left;
+        }
+        #api-diagram {
+            min-width: 1200px;
+            padding: 20px;
+        }
+        #fullscreen-diagram svg {
+            min-width: 1400px !important;
+            width: 100% !important;
+            max-width: none !important;
+        }
+        .close-fullscreen {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #f44336;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            z-index: 10000;
+        }
+        .close-fullscreen:hover {
+            background: #da190b;
+        }
+        .close-fullscreen:active {
+            transform: scale(0.95);
+        }
+        @media (max-width: 768px) {
+            .fullscreen-content .mermaid {
+                min-width: 100%;
+                min-height: 400px;
+            }
+        }
+        .nav {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .nav a {
+            margin-right: 15px;
+            text-decoration: none;
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        .nav a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <a href="#system">System Architecture</a>
+        <a href="#dataflow">Data Flow</a>
+        <a href="#search">Search Architecture</a>
+        <a href="#api">API Endpoints</a>
+        <a href="#database">Database Schema</a>
+    </div>
+
+    <h1>AskMyVideo Architecture Diagrams</h1>
+    <p>All diagrams are interactive and rendered using Mermaid.js</p>
+
+    <h2 id="system">System Architecture</h2>
+    <div class="diagram-container">
+        <button class="fullscreen-btn" onclick="openFullscreen('system-diagram', 'System Architecture')">⛶ Fullscreen</button>
+        <div class="mermaid" id="system-diagram">
+graph TB
+    subgraph "Client Layer"
+        Web[Web Browser]
+        API_Client[API Clients]
+    end
+    
+    subgraph "Django Application"
+        Views[Django Views]
+        API[REST API]
+        Admin[Admin Panel]
+        Auth[Authentication]
+    end
+    
+    subgraph "Business Logic"
+        VideoProcessor[Video Processor]
+        SearchEngine[Search Engine]
+        EnhancedSearch[Enhanced Search]
+        RAG[RAG System]
+    end
+    
+    subgraph "AI/ML Components"
+        Whisper[Whisper AI]
+        Embeddings[Sentence Transformers]
+        FAISS[FAISS Index]
+        Models[AI Models]
+    end
+    
+    subgraph "Data Storage"
+        DB[(Database)]
+        Media[Media Files]
+        Cache[Search Cache]
+    end
+    
+    subgraph "External Services"
+        YouTube[YouTube API]
+    end
+    
+    Web --> Views
+    Web --> Admin
+    API_Client --> API
+    Views --> Auth
+    API --> Auth
+    
+    Views --> VideoProcessor
+    API --> SearchEngine
+    API --> EnhancedSearch
+    API --> RAG
+    
+    VideoProcessor --> Whisper
+    VideoProcessor --> Media
+    VideoProcessor --> DB
+    
+    SearchEngine --> Embeddings
+    SearchEngine --> FAISS
+    EnhancedSearch --> Embeddings
+    EnhancedSearch --> FAISS
+    EnhancedSearch --> Models
+    
+    RAG --> SearchEngine
+    RAG --> Models
+    
+    FAISS --> Cache
+    Embeddings --> Models
+    Models --> Cache
+    
+    VideoProcessor --> YouTube
+    VideoProcessor --> DB
+    SearchEngine --> DB
+    EnhancedSearch --> DB
+    RAG --> DB
+        </div>
+    </div>
+
+    <h2 id="dataflow">Video Processing Flow</h2>
+    <div class="diagram-container">
+        <button class="fullscreen-btn" onclick="openFullscreen('dataflow-diagram', 'Video Processing Flow')">⛶ Fullscreen</button>
+        <div class="mermaid" id="dataflow-diagram">
+flowchart TD
+    Start([User Uploads Video]) --> Validate{Validate Format}
+    Validate -->|Invalid| Error1[Return Error]
+    Validate -->|Valid| CreateJob[Create VideoJob<br/>Status: PENDING]
+    
+    CreateJob --> SaveFile[Save Video File]
+    SaveFile --> StartThread[Start Background Thread]
+    
+    StartThread --> UpdateStatus1[Update Status: PROCESSING]
+    UpdateStatus1 --> ExtractMeta[Extract Metadata<br/>Duration, Resolution, Codec]
+    
+    ExtractMeta --> ExtractAudio[Extract Audio<br/>FFmpeg]
+    ExtractAudio --> Transcribe[Transcribe Audio<br/>Whisper AI]
+    
+    Transcribe --> CreateSegments[Create Text Segments<br/>with Timestamps]
+    CreateSegments --> SaveTranscription[Save Transcription<br/>to Database]
+    
+    SaveTranscription --> IndexSearch[Index Segments<br/>for Search]
+    IndexSearch --> UpdateStatus2[Update Status: COMPLETED]
+    
+    UpdateStatus2 --> End([Video Ready for Search])
+    
+    Error1 --> End
+    Transcribe -.->|Error| UpdateFailed[Update Status: FAILED]
+    UpdateFailed --> End
+        </div>
+    </div>
+
+    <h2 id="search">Search Query Flow</h2>
+    <div class="diagram-container">
+        <button class="fullscreen-btn" onclick="openFullscreen('search-diagram', 'Search Query Flow')">⛶ Fullscreen</button>
+        <div class="mermaid" id="search-diagram">
+flowchart TD
+    Start([User Submits Query]) --> ParseQuery[Parse Query]
+    ParseQuery --> CheckMode{Search Mode?}
+    
+    CheckMode -->|Keyword| KeywordSearch[Keyword Search<br/>Text Matching]
+    CheckMode -->|Semantic| SemanticSearch[Semantic Search<br/>Vector Similarity]
+    CheckMode -->|Hybrid| HybridSearch[Hybrid Search<br/>Both Methods]
+    CheckMode -->|Enhanced| EnhancedSearch[Enhanced Search<br/>Advanced Features]
+    
+    KeywordSearch --> Rank1[Rank Results]
+    SemanticSearch --> GenerateEmbedding[Generate Query Embedding]
+    GenerateEmbedding --> FAISSSearch[FAISS Vector Search]
+    FAISSSearch --> Rank2[Rank by Similarity]
+    
+    HybridSearch --> KeywordSearch
+    HybridSearch --> SemanticSearch
+    HybridSearch --> Combine[Combine Results]
+    Combine --> Rank3[Rerank Combined]
+    
+    EnhancedSearch --> GenerateEmbedding
+    EnhancedSearch --> Diversify[Diversify Results]
+    EnhancedSearch --> FilterTopics[Filter by Topics]
+    FilterTopics --> Rank4[Rank with Advanced Features]
+    
+    Rank1 --> FormatResults[Format Results]
+    Rank2 --> FormatResults
+    Rank3 --> FormatResults
+    Rank4 --> FormatResults
+    
+    FormatResults --> AddMetadata[Add Video Metadata]
+    AddMetadata --> ReturnResults[Return Results<br/>with Timestamps]
+    ReturnResults --> End([Display Results])
+        </div>
+    </div>
+
+    <h2 id="api">API Endpoints Structure</h2>
+    <div class="diagram-container">
+        <button class="fullscreen-btn" onclick="openFullscreen('api-diagram', 'API Endpoints Structure')">⛶ Fullscreen</button>
+        <div class="mermaid" id="api-diagram">
+graph TB
+    API["API Base: /api/"]
+    
+    API --> SearchGroup[Search Endpoints]
+    API --> VideoGroup[Video Endpoints]
+    API --> AdminGroup[Admin Endpoints]
+    API --> HealthGroup[Health Endpoints]
+    API --> TeamsGroup[Teams Endpoints]
+    API --> HybridGroup[Hybrid Endpoints]
+    API --> DocsGroup[Documentation]
+    
+    SearchGroup --> SearchBasic["POST /api/search<br/>Basic search"]
+    SearchGroup --> SearchEnhanced["POST /api/enhanced-search<br/>Enhanced search"]
+    SearchGroup --> SearchAdvanced["POST /api/advanced-search<br/>Advanced search"]
+    SearchGroup --> RAG["POST /api/rag-qa<br/>RAG Q&A"]
+    
+    VideoGroup --> VideoDetails["GET /api/video/&lt;job_id&gt;/<br/>Get video details"]
+    VideoGroup --> VideoUpdate["POST /api/video/&lt;job_id&gt;/update-metadata<br/>Update metadata"]
+    VideoGroup --> VideoFile["GET /video-file/&lt;job_id&gt;/<br/>Serve video file"]
+    
+    AdminGroup --> SearchStatus["GET /api/search-status<br/>Search engine status"]
+    AdminGroup --> DetailedStats["GET /api/detailed-stats<br/>System statistics"]
+    AdminGroup --> PendingJobs["GET /api/pending-jobs<br/>Pending jobs"]
+    AdminGroup --> RebuildIndex["POST /api/rebuild-search-index<br/>Rebuild index"]
+    AdminGroup --> RebuildEnhanced["POST /api/rebuild-enhanced-search-index<br/>Rebuild enhanced index"]
+    AdminGroup --> CleanupYouTube["POST /api/cleanup-youtube<br/>Cleanup YouTube files"]
+    AdminGroup --> ProcessJob["POST /api/process-job<br/>Process job"]
+    
+    HealthGroup --> HealthCheck["GET /api/health<br/>Health check"]
+    HealthGroup --> HealthBasic["GET /health<br/>Basic health"]
+    
+    TeamsGroup --> TeamsSummary["GET /api/teams/summary<br/>Teams summary"]
+    TeamsGroup --> TeamsList["GET /api/teams<br/>Teams list"]
+    
+    HybridGroup --> HybridStatus["GET /api/hybrid/status<br/>Hybrid status"]
+    HybridGroup --> HybridProcessed["GET /api/hybrid/processed<br/>Processed batches"]
+    HybridGroup --> HybridProcess["POST /api/hybrid/process<br/>Process batch"]
+    
+    DocsGroup --> Schema["GET /api/schema<br/>OpenAPI schema"]
+    DocsGroup --> Swagger["GET /api/docs<br/>Swagger UI"]
+    DocsGroup --> Redoc["GET /api/redoc<br/>ReDoc UI"]
+    
+    style API fill:#4CAF50,color:#fff
+    style SearchGroup fill:#2196F3,color:#fff
+    style VideoGroup fill:#FF9800,color:#fff
+    style AdminGroup fill:#9C27B0,color:#fff
+    style HealthGroup fill:#F44336,color:#fff
+    style TeamsGroup fill:#00BCD4,color:#fff
+    style HybridGroup fill:#795548,color:#fff
+    style DocsGroup fill:#607D8B,color:#fff
+        </div>
+    </div>
+
+    <h2 id="database">Database Schema</h2>
+    <div class="diagram-container">
+        <button class="fullscreen-btn" onclick="openFullscreen('database-diagram', 'Database Schema')">⛶ Fullscreen</button>
+        <div class="mermaid" id="database-diagram">
+erDiagram
+    User ||--o{ VideoJob : owns
+    User ||--o{ VideoSearchQuery : creates
+    
+    VideoJob {
+        uuid job_id PK
+        int user_id FK
+        string video_path
+        string video_name
+        string youtube_url
+        string status
+        json metadata
+        json transcription
+    }
+    
+    VideoSearchQuery {
+        int id PK
+        string query
+        int results_count
+        datetime created_at
+    }
+    
+    User {
+        int id PK
+        string username
+        string email
+    }
+        </div>
+    </div>
+
+    <!-- Fullscreen Overlay -->
+    <div id="fullscreen-overlay" class="fullscreen-overlay" onclick="closeFullscreen(event)">
+        <div class="fullscreen-content" onclick="event.stopPropagation()">
+            <button class="close-fullscreen" onclick="closeFullscreen()">✕ Close</button>
+            <h3 id="fullscreen-title"></h3>
+            <div id="fullscreen-diagram" class="mermaid"></div>
+        </div>
+    </div>
+
+    <script>
+        // Store original Mermaid code for each diagram BEFORE Mermaid processes it
+        const diagramCodes = {};
+        
+        // Extract and store Mermaid code immediately when page loads
+        (function() {
+            const diagrams = document.querySelectorAll('.mermaid[id]');
+            diagrams.forEach(diagram => {
+                const code = diagram.textContent.trim();
+                if (code && code.length > 10) {
+                    diagramCodes[diagram.id] = code;
+                    // Store in data attribute as backup
+                    diagram.setAttribute('data-code', code);
+                }
+            });
+        })();
+        
+        // Initialize Mermaid after storing codes with larger default size
+        mermaid.initialize({ 
+            startOnLoad: true, 
+            theme: 'default',
+            flowchart: {
+                useMaxWidth: false,
+                htmlLabels: true,
+                curve: 'basis'
+            },
+            gantt: {
+                useMaxWidth: false
+            }
+        });
+        
+        function openFullscreen(diagramId, title) {
+            const diagramElement = document.getElementById(diagramId);
+            const overlay = document.getElementById('fullscreen-overlay');
+            const titleElement = document.getElementById('fullscreen-title');
+            const fullscreenDiagram = document.getElementById('fullscreen-diagram');
+            
+            if (!diagramElement) return;
+            
+            // Get the Mermaid code from stored codes or data attribute
+            let mermaidCode = diagramCodes[diagramId] || diagramElement.getAttribute('data-code');
+            
+            if (!mermaidCode || mermaidCode.length < 10) {
+                console.error('Could not extract Mermaid code for diagram:', diagramId);
+                alert('Unable to load diagram in fullscreen. Please refresh the page.');
+                return;
+            }
+            
+            // Set title
+            titleElement.textContent = title;
+            
+            // Clear the diagram container completely
+            fullscreenDiagram.innerHTML = '';
+            fullscreenDiagram.className = 'mermaid';
+            
+            // Show overlay first
+            overlay.classList.add('active');
+            
+            // Prevent body scroll
+            document.body.style.overflow = 'hidden';
+            
+            // Set the Mermaid code as text content
+            fullscreenDiagram.textContent = mermaidCode;
+            
+            // Render using Mermaid API - wait for overlay to be visible
+            setTimeout(() => {
+                try {
+                    // Try to find the rendered SVG in the original diagram and clone it
+                    const originalSvg = diagramElement.querySelector('svg');
+                    if (originalSvg) {
+                        // Clone the rendered SVG for instant display
+                        const clonedSvg = originalSvg.cloneNode(true);
+                        // Remove any existing width/height constraints
+                        clonedSvg.removeAttribute('width');
+                        clonedSvg.removeAttribute('height');
+                        clonedSvg.style.width = '100%';
+                        clonedSvg.style.height = 'auto';
+                        clonedSvg.style.minWidth = '1400px';
+                        clonedSvg.style.maxWidth = 'none';
+                        // For API diagram, make it even larger
+                        if (diagramId === 'api-diagram') {
+                            clonedSvg.style.minWidth = '1600px';
+                            clonedSvg.style.transform = 'scale(1.1)';
+                            clonedSvg.style.transformOrigin = 'top left';
+                        }
+                        // Scale up the viewBox if needed for better visibility
+                        const viewBox = clonedSvg.getAttribute('viewBox');
+                        if (viewBox) {
+                            // Keep original viewBox but ensure it scales
+                            clonedSvg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+                        }
+                        fullscreenDiagram.innerHTML = '';
+                        fullscreenDiagram.appendChild(clonedSvg);
+                        console.log('Cloned SVG for fullscreen');
+                    } else {
+                        // If no SVG found, render fresh using Mermaid
+                        // For Mermaid 10.x
+                        if (typeof mermaid.run === 'function') {
+                            mermaid.run({
+                                querySelector: '#fullscreen-diagram',
+                                suppressErrors: false
+                            }).then(() => {
+                                console.log('Mermaid diagram rendered successfully');
+                            }).catch(err => {
+                                console.error('Mermaid render error:', err);
+                                // Fallback: try contentLoaded
+                                if (typeof mermaid.contentLoaded === 'function') {
+                                    mermaid.contentLoaded();
+                                } else {
+                                    mermaid.init(undefined, '#fullscreen-diagram');
+                                }
+                            });
+                        } else if (typeof mermaid.contentLoaded === 'function') {
+                            // Alternative Mermaid 10 API
+                            mermaid.contentLoaded();
+                        } else {
+                            // Fallback for older versions
+                            mermaid.init(undefined, '#fullscreen-diagram');
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error rendering Mermaid:', error);
+                    // Last resort: try to reinitialize
+                    try {
+                        mermaid.initialize({ startOnLoad: false, theme: 'default' });
+                        if (typeof mermaid.contentLoaded === 'function') {
+                            mermaid.contentLoaded();
+                        } else {
+                            mermaid.init(undefined, '#fullscreen-diagram');
+                        }
+                    } catch (e) {
+                        console.error('Failed to render diagram:', e);
+                    }
+                }
+            }, 100);
+        }
+        
+        function closeFullscreen(event) {
+            // Only close if clicking on overlay background or close button
+            if (event && event.target.id !== 'fullscreen-overlay' && event.target.className !== 'close-fullscreen') {
+                return;
+            }
+            
+            const overlay = document.getElementById('fullscreen-overlay');
+            overlay.classList.remove('active');
+            
+            // Restore body scroll
+            document.body.style.overflow = 'auto';
+            
+            // Clear the diagram content
+            const fullscreenDiagram = document.getElementById('fullscreen-diagram');
+            fullscreenDiagram.textContent = '';
+        }
+        
+        // Close on Escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                const overlay = document.getElementById('fullscreen-overlay');
+                if (overlay.classList.contains('active')) {
+                    closeFullscreen();
+                }
+            }
+        });
+    </script>
+</body>
+</html>
+

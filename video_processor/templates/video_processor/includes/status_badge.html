@@ -1,0 +1,21 @@
+{# Usage: {% include "video_processor/includes/status_badge.html" with status=video.status %} #}
+{% if status == 'completed' %}
+<span class="flex items-center gap-1 bg-secondary-container/50 text-on-secondary-container px-2 py-0.5 rounded font-label-md">
+    <span class="w-1.5 h-1.5 rounded-full bg-secondary"></span>
+    {{ label|default:status }}
+</span>
+{% elif status == 'processing' %}
+<span class="flex items-center gap-1 bg-secondary-container/50 text-on-secondary-container px-2 py-0.5 rounded font-label-md">
+    <span class="w-1.5 h-1.5 rounded-full bg-secondary animate-pulse"></span>
+    {{ label|default:status }}
+</span>
+{% elif status == 'failed' %}
+<span class="flex items-center gap-1 bg-error-container/50 text-on-error-container px-2 py-0.5 rounded font-label-md">
+    <span class="w-1.5 h-1.5 rounded-full bg-error"></span>
+    {{ label|default:status }}
+</span>
+{% else %}
+<span class="flex items-center gap-1 bg-surface-container text-on-surface-variant px-2 py-0.5 rounded font-label-md">
+    {{ label|default:status }}
+</span>
+{% endif %}

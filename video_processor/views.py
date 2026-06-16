@@ -34,6 +34,19 @@ from drf_spectacular.types import OpenApiTypes
 from core_video_processor import CoreVideoProcessor
 
 from .models import JobStatus, VideoJob, VideoSearchQuery
+from .search_helpers import (
+    convert_enhanced_results_to_api_format,
+    convert_semantic_results_to_display_format,
+    convert_semantic_results_to_api_format,
+    convert_keyword_results_to_api_format,
+    filter_api_results_by_user,
+    get_video_segments_for_search,
+    perform_keyword_search,
+    resolve_target_user,
+    run_advanced_api_search,
+    run_enhanced_api_search,
+    run_legacy_api_search,
+)
 # from .tasks import process_youtube_playlist, process_single_video, is_youtube_playlist_url
 
 # Configure logging first (before any imports that use logger)
@@ -48,30 +61,12 @@ except ImportError as e:
     search_engine = None
     SemanticSearchEngine = None
 
-# Import AI enhancement system
-try:
-    from ai_enhanced_search import (
-        create_ai_config,
-        enhance_search_with_ai,
-        get_ai_engine,
-    )
-    AI_AVAILABLE = True
-    logger.info("AI enhanced search components imported successfully")
-except ImportError as e:
-    logger.warning(f"AI enhanced search not available: {e}")
-    AI_AVAILABLE = False
-    create_ai_config = None
-    enhance_search_with_ai = None
-    get_ai_engine = None
-
-# Phase 2: Import enhanced AI components
+# Phase 2: enhanced search + RAG (whisper pipeline removed — core path uses core_video_processor)
 try:
     from enhanced_semantic_search import get_enhanced_search_engine
-    from enhanced_whisper_pipeline import get_enhanced_whisper
     from rag_qa_system import get_rag_qa_system
 
     enhanced_search = get_enhanced_search_engine()
-    enhanced_whisper = get_enhanced_whisper()
     rag_qa = get_rag_qa_system()
 
     PHASE2_AI_AVAILABLE = True
@@ -80,7 +75,6 @@ try:
 except ImportError as e:
     logger.warning(f"Phase 2 AI components not available: {e}")
     enhanced_search = None
-    enhanced_whisper = None
     rag_qa = None
     PHASE2_AI_AVAILABLE = False
 
@@ -349,117 +343,16 @@ def search_videos(request):
     )
 
 
-def perform_keyword_search(query):
-    """Perform traditional keyword-based search."""
-    search_results = []
-    videos = VideoJob.objects.filter(
-        status=JobStatus.COMPLETED, transcription__isnull=False
-    )
-
-    for video in videos:
-        transcription_text = video.transcription_text.lower()
-        if query.lower() in transcription_text:
-            # Get matching segments
-            matching_segments = video.search_segments(query)
-            if matching_segments:
-                search_results.append({"video": video, "segments": matching_segments})
-
-    return search_results
 
 
-def get_video_segments_for_search():
-    """Get video segments data formatted for semantic search."""
-    videos = VideoJob.objects.filter(
-        status=JobStatus.COMPLETED, transcription__isnull=False
-    )
-
-    video_segments_data = []
-    for video in videos:
-        segments = video.text_segments
-        if segments:
-            video_segments_data.append(
-                {
-                    "job_id": str(video.job_id),
-                    "video_name": video.video_name,
-                    "segments": segments,
-                }
-            )
-
-    return video_segments_data
-
-
-def convert_semantic_results_to_display_format(semantic_results):
-    """Convert semantic search results to the format expected by the template."""
-    # Group results by video
-    video_groups = {}
-
-    for result in semantic_results:
-        job_id = result.job_id
-        if job_id not in video_groups:
-            try:
-                video = VideoJob.objects.get(job_id=job_id)
-                video_groups[job_id] = {"video": video, "segments": []}
-            except VideoJob.DoesNotExist:
-                continue
-
-        # Add segment with relevance score
-        segment = {
-            "start_time": result.start_time,
-            "end_time": result.end_time,
-            "text": result.text,
-            "relevance_score": result.score,
-            "search_type": result.search_type,
-        }
-        video_groups[job_id]["segments"].append(segment)
-
-    return list(video_groups.values())
-
-
-def convert_semantic_results_to_api_format(semantic_results):
-    """Convert semantic search results to JSON-serializable format for API."""
-    api_results = []
-
-    for result in semantic_results:
-        api_results.append(
-            {
-                "video_id": result.job_id,
-                "video_name": clean_video_name(result.video_name),
-                "start_time": result.start_time,
-                "end_time": result.end_time,
-                "text": result.text,
-                "relevance_score": result.score,
-                "search_type": "semantic",
-                "timestamp_formatted": f"{int(result.start_time // 60)}:{int(result.start_time % 60):02d}"
-            }
-        )
-
-    return api_results
-
-
-def convert_keyword_results_to_api_format(keyword_results):
-    """Convert keyword search results to JSON-serializable format for API."""
-    api_results = []
-
-    for result in keyword_results:
-        api_results.append(
-            {
-                "video_id": result["job_id"],
-                "video_name": clean_video_name(result["video_name"]),
-                "start_time": result["start_time"],
-                "end_time": result["end_time"],
-                "text": result["text"],
-                "relevance_score": result["score"],
-                "search_type": "keyword",
-                "timestamp_formatted": f"{int(result['start_time'] // 60)}:{int(result['start_time'] % 60):02d}"
-            }
-        )
-
-    return api_results
-
-
-@csrf_exempt
+@login_required
 def upload_video(request):
     """Handle video upload and processing (files, YouTube URLs, or YouTube playlists)."""
+    if request.method == "GET":
+        return render(request, "video_processor/upload.html", {
+            "recent_videos": VideoJob.objects.filter(user=request.user).order_by("-created_at")[:10],
+        })
+
     if request.method != "POST":
         return redirect("video_library")
 
@@ -666,13 +559,33 @@ def transcript_editor(request, job_id):
     try:
         video = VideoJob.objects.get(job_id=job_id, user=request.user)
     except VideoJob.DoesNotExist:
+        if request.method != "GET" or request.headers.get("Content-Type") == "application/json":
+            return JsonResponse({"status": "error", "message": "Video not found or access denied."}, status=404)
         messages.error(request, "Video not found or access denied.")
         return redirect("video_library")
-    
+
     if video.status != JobStatus.COMPLETED:
+        if request.method != "GET" or request.headers.get("Content-Type") == "application/json":
+            return JsonResponse({"status": "error", "message": "Video processing not completed yet."}, status=400)
         messages.error(request, "Video processing not completed yet.")
         return redirect("video_library")
-    
+
+    if request.method == "GET" and request.GET.get("format") == "json":
+        return JsonResponse({"status": "success", "transcript": video.transcription_text})
+
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            transcript = data.get("transcript", "")
+            if video.transcription:
+                video.transcription = {**video.transcription, "text": transcript, "word_count": len(transcript.split())}
+            else:
+                video.transcription = {"text": transcript, "word_count": len(transcript.split())}
+            video.save()
+            return JsonResponse({"status": "success"})
+        except (json.JSONDecodeError, TypeError) as e:
+            return JsonResponse({"status": "error", "message": str(e)}, status=400)
+
     return render(request, "video_processor/transcript_editor.html", {
         "video": video,
     })
@@ -748,6 +661,16 @@ def api_search_status(request):
     except Exception as e:
         logger.error(f"Error in api_search_status: {e}")
         return JsonResponse({"error": str(e)}, status=500)
+
+
+def rebuild_search_index():
+    """Rebuild semantic search index (CLI helper)."""
+    if search_engine and hasattr(search_engine, "rebuild_index"):
+        return search_engine.rebuild_index()
+    segments = get_video_segments_for_search()
+    if search_engine and hasattr(search_engine, "add_segments"):
+        search_engine.add_segments(segments)
+    return len(segments)
 
 
 @login_required
@@ -1175,157 +1098,7 @@ def process_video_job(job_id):
             pass
 
 
-# Hybrid processing functions
-@csrf_exempt
-def process_hybrid_batch(request):
-    """Process a batch of videos downloaded by the standalone downloader."""
-    if request.method != 'POST':
-        return JsonResponse({'error': 'Method not allowed'}, status=405)
-    
-    try:
-        data = json.loads(request.body)
-        batch_file = data.get('batch_file')
-        
-        if not batch_file or not Path(batch_file).exists():
-            return JsonResponse({'error': 'Batch file not found'}, status=400)
-        
-        # Load batch information
-        with open(batch_file, 'r') as f:
-            batch_info = json.load(f)
-        
-        downloads = batch_info.get('downloads', [])
-        if not downloads:
-            return JsonResponse({'error': 'No downloads in batch'}, status=400)
-        
-        processed_videos = []
-        
-        for download in downloads:
-            video_path = download.get('file_path')
-            metadata = download.get('metadata', {})
-            
-            if not video_path or not Path(video_path).exists():
-                logger.error(f"❌ Video file not found: {video_path}")
-                continue
-            
-            try:
-                # Create video job record with correct field names
-                video_job = VideoJob.objects.create(
-                    user=request.user if request.user.is_authenticated else User.objects.get(id=1),
-                    title=metadata.get('title', 'Hybrid Video'),
-                    video_name=Path(video_path).name,
-                    video_path=video_path,
-                    file_size_bytes=Path(video_path).stat().st_size,
-                    youtube_url=metadata.get('webpage_url', ''),
-                    status=JobStatus.PENDING
-                )
-                
-                logger.info(f"📝 Created VideoJob for: {video_job.title}")
-                
-                # Start processing using the existing video processing pipeline
-                try:
-                    # Use the existing process_video_job function
-                    process_video_job(video_job.job_id)
-                    
-                    # Refresh from database to get updated status
-                    video_job.refresh_from_db()
-                    
-                    if video_job.status == JobStatus.COMPLETED:
-                        processed_videos.append({
-                            'id': str(video_job.job_id),
-                            'title': video_job.title,
-                            'status': 'success'
-                        })
-                        logger.info(f"✅ Successfully processed: {video_job.title}")
-                    else:
-                        logger.error(f"❌ Processing failed for: {video_job.title}")
-                        
-                except Exception as e:
-                    logger.error(f"❌ Error processing {video_path}: {e}")
-                    video_job.status = JobStatus.FAILED
-                    video_job.error_message = str(e)
-                    video_job.save()
-                    continue
-                    
-            except Exception as e:
-                logger.error(f"❌ Error creating VideoJob for {video_path}: {e}")
-                continue
-        
-        # Mark batch as processed by moving the batch file to processed directory
-        try:
-            processed_dir = Path('./downloads/processed')
-            processed_dir.mkdir(parents=True, exist_ok=True)
-            
-            batch_path = Path(batch_file)
-            processed_path = processed_dir / batch_path.name
-            
-            # Move the batch file to processed directory
-            batch_path.rename(processed_path)
-            logger.info(f"✅ Moved batch file to processed: {processed_path}")
-            
-        except Exception as e:
-            logger.error(f"❌ Error marking batch as processed: {e}")
-        
-        return JsonResponse({
-            'success': True,
-            'processed_videos': processed_videos,
-            'total_processed': len(processed_videos)
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Hybrid batch processing failed: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
 
-@csrf_exempt
-def api_hybrid_status(request):
-    """Check for available hybrid batches to process."""
-    try:
-        downloads_dir = Path('./downloads/metadata')
-        processed_dir = Path('./downloads/processed')
-        
-        # Create processed directory if it doesn't exist
-        processed_dir.mkdir(parents=True, exist_ok=True)
-        
-        if not downloads_dir.exists():
-            return JsonResponse({
-                'batches_available': 0,
-                'batches': []
-            })
-        
-        # Only get batch files that haven't been processed yet
-        batch_files = list(downloads_dir.glob('batch_*.json'))
-        batches = []
-        
-        for batch_file in batch_files:
-            try:
-                with open(batch_file, 'r') as f:
-                    batch_info = json.load(f)
-                
-                # Check if this batch has already been processed
-                processed_file = processed_dir / batch_file.name
-                if processed_file.exists():
-                    # This batch has been processed, skip it
-                    continue
-                    
-                batches.append({
-                    'file_path': str(batch_file),
-                    'batch_name': batch_info.get('batch_name', 'Unknown'),
-                    'created_at': batch_info.get('created_at', 0),
-                    'total_videos': batch_info.get('total_videos', 0)
-                })
-            except:
-                continue
-        
-        # Sort by creation time (newest first)
-        batches.sort(key=lambda x: x['created_at'], reverse=True)
-        
-        return JsonResponse({
-            'batches_available': len(batches),
-            'batches': batches
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Error checking hybrid status: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
 
 @extend_schema(
     tags=['Search'],
@@ -1367,41 +1140,24 @@ def api_search(request):
     try:
         data = json.loads(request.body)
         query = data.get("query", "").strip()
-        search_mode = data.get("search_mode", "hybrid")  # keyword, semantic, hybrid
+        search_mode = data.get("search_mode", data.get("mode", "hybrid"))
+        username = data.get("username", "").strip()
 
         if not query:
             return JsonResponse({"error": "Query is required"}, status=400)
 
+        target_user = resolve_target_user(username)
+        if target_user is False:
+            return JsonResponse({"error": "User not found"}, status=404)
+
         # Track search query
         VideoSearchQuery.objects.create(query=query, results_count=0)
 
-        # Perform search based on selected mode
-        search_results = []
+        search_results, search_mode = run_legacy_api_search(
+            query, search_mode, search_engine, k=50
+        )
 
-        try:
-            if search_mode == "semantic" and search_engine and search_engine.is_initialized:
-                # Pure semantic search
-                semantic_results = search_engine.semantic_search(query, top_k=50)
-                search_results = convert_semantic_results_to_api_format(semantic_results)
-
-            elif search_mode == "hybrid" and search_engine and search_engine.is_initialized:
-                # Hybrid search (combines semantic + keyword)
-                video_segments_data = get_video_segments_for_search()
-                hybrid_results = search_engine.hybrid_search(
-                    query, video_segments_data, top_k=50
-                )
-                search_results = convert_semantic_results_to_api_format(hybrid_results)
-
-            else:
-                # Fallback to keyword search
-                keyword_results = perform_keyword_search(query)
-                search_results = convert_keyword_results_to_api_format(keyword_results)
-
-        except Exception as e:
-            logger.error(f"Search error: {e}")
-            # Fallback to keyword search on any error
-            keyword_results = perform_keyword_search(query)
-            search_results = convert_keyword_results_to_api_format(keyword_results)
+        search_results = filter_api_results_by_user(search_results, target_user)
 
         # Update search query results count
         VideoSearchQuery.objects.filter(query=query).update(
@@ -1413,7 +1169,9 @@ def api_search(request):
             "results": search_results,
             "query": query,
             "search_mode": search_mode,
-            "total_results": len(search_results)
+            "mode": search_mode,
+            "total_results": len(search_results),
+            "count": len(search_results),
         })
 
     except json.JSONDecodeError:
@@ -1463,55 +1221,18 @@ def api_enhanced_search(request):
         if not query:
             return JsonResponse({"error": "Query is required"}, status=400)
 
-        # Use enhanced search if available, otherwise fall back to regular search
-        search_results = []
-        search_mode = "enhanced"
-        
-        try:
-            if enhanced_search and PHASE2_AI_AVAILABLE:
-                # Try enhanced semantic search with diversification
-                try:
-                    enhanced_results = enhanced_search.search(
-                        query=query,
-                        k=k,
-                        min_similarity=min_similarity,
-                        filter_topics=filter_topics,
-                        diversify_results=diversify,
-                        max_results_per_video=max_per_video
-                    )
-                    search_results = convert_enhanced_results_to_api_format(enhanced_results)
-                    search_mode = "enhanced_diversified" if diversify else "enhanced"
-                except Exception as enhanced_error:
-                    logger.warning(f"Enhanced search failed, falling back to regular search: {enhanced_error}")
-                    # Fall back to regular semantic search
-                    if search_engine and search_engine.is_initialized:
-                        semantic_results = search_engine.semantic_search(query, top_k=k)
-                        search_results = convert_semantic_results_to_api_format(semantic_results)
-                        search_mode = "semantic"
-                    else:
-                        # Fall back to keyword search
-                        keyword_results = perform_keyword_search(query)
-                        search_results = convert_keyword_results_to_api_format(keyword_results)
-                        search_mode = "keyword"
-            elif search_engine and search_engine.is_initialized:
-                # Fall back to regular semantic search
-                semantic_results = search_engine.semantic_search(query, top_k=k)
-                search_results = convert_semantic_results_to_api_format(semantic_results)
-                search_mode = "semantic"
-            else:
-                # Fall back to keyword search
-                keyword_results = perform_keyword_search(query)
-                search_results = convert_keyword_results_to_api_format(keyword_results)
-                search_mode = "keyword"
+        search_results, search_mode = run_enhanced_api_search(
+            query,
+            search_engine,
+            enhanced_search,
+            PHASE2_AI_AVAILABLE,
+            k,
+            min_similarity,
+            diversify,
+            max_per_video,
+            filter_topics,
+        )
 
-        except Exception as e:
-            logger.error(f"Enhanced search error: {e}")
-            # Fallback to keyword search on any error
-            keyword_results = perform_keyword_search(query)
-            search_results = convert_keyword_results_to_api_format(keyword_results)
-            search_mode = "keyword_fallback"
-
-        # Add search statistics
         video_count = len(set(result.get("video_id") for result in search_results))
         
         return JsonResponse({
@@ -1612,48 +1333,6 @@ def api_rag_qa(request):
         return JsonResponse({"error": str(e)}, status=500)
 
 
-def clean_video_name(video_name):
-    """Clean video name by removing YouTube IDs and file extensions."""
-    if not video_name:
-        return "Unknown Video"
-    
-    # Remove file extension
-    name_without_ext = video_name.rsplit('.', 1)[0] if '.' in video_name else video_name
-    
-    # Remove YouTube video ID pattern (11 characters at the end)
-    # Pattern: _hCqrovx0h6E or similar
-    import re
-    # Remove YouTube ID pattern: _ followed by 11 alphanumeric characters
-    cleaned_name = re.sub(r'_[a-zA-Z0-9_-]{11}$', '', name_without_ext)
-    
-    # If the name is now empty or just whitespace, return a fallback
-    if not cleaned_name.strip():
-        return "Video"
-    
-    return cleaned_name.strip()
-
-def convert_enhanced_results_to_api_format(enhanced_results):
-    """Convert enhanced search results to JSON-serializable format for API."""
-    api_results = []
-
-    for result in enhanced_results:
-        api_results.append(
-            {
-                "video_id": result.video_id,
-                "video_name": clean_video_name(result.video_title),
-                "start_time": result.start_time,
-                "end_time": result.end_time,
-                "text": result.segment_text,
-                "relevance_score": result.confidence_score,
-                "semantic_similarity": result.semantic_similarity,
-                "search_type": "enhanced",
-                "topic_tags": result.topic_tags,
-                "context_window": result.context_window[:200] + "..." if len(result.context_window) > 200 else result.context_window,
-                "sentiment_score": result.sentiment_score
-            }
-        )
-
-    return api_results
 
 @csrf_exempt
 def health_check(request):
@@ -1828,92 +1507,6 @@ def video_file_serve(request, job_id):
         return JsonResponse({"error": "Internal server error"}, status=500)
 
 
-@extend_schema(
-    tags=['Teams'],
-    summary='Get teams summary',
-    description='Get summary statistics for the current user\'s video collection.',
-    responses={200: {'description': 'Teams summary data'}}
-)
-@csrf_exempt
-def api_teams_summary(request):
-    """API endpoint for teams summary - placeholder for frontend compatibility"""
-    try:
-        # Get current user's video statistics
-        if not request.user.is_authenticated:
-            return JsonResponse({"error": "Authentication required"}, status=401)
-        
-        # Get user's video statistics
-        total_videos = VideoJob.objects.filter(user=request.user).count()
-        completed_videos = VideoJob.objects.filter(user=request.user, status='completed').count()
-        processing_videos = VideoJob.objects.filter(user=request.user, status='processing').count()
-        failed_videos = VideoJob.objects.filter(user=request.user, status='failed').count()
-        
-        # Calculate total storage used
-        total_storage = sum(
-            job.file_size_bytes or 0 
-            for job in VideoJob.objects.filter(user=request.user)
-        )
-        
-        return JsonResponse({
-            "success": True,
-            "data": {
-                "total_videos": total_videos,
-                "completed_videos": completed_videos,
-                "processing_videos": processing_videos,
-                "failed_videos": failed_videos,
-                "total_storage_bytes": total_storage,
-                "total_storage_mb": round(total_storage / (1024 * 1024), 2),
-                "user_id": request.user.id,
-                "username": request.user.username,
-                "email": request.user.email
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Error in teams summary: {e}")
-        return JsonResponse({
-            "success": False,
-            "error": "Failed to get teams summary"
-        }, status=500)
-
-
-@extend_schema(
-    tags=['Teams'],
-    summary='Get teams list',
-    description='Get list of teams for the current user.',
-    responses={200: {'description': 'Teams list'}}
-)
-@csrf_exempt
-def api_teams_list(request):
-    """API endpoint for teams list - placeholder for frontend compatibility"""
-    try:
-        if not request.user.is_authenticated:
-            return JsonResponse({"error": "Authentication required"}, status=401)
-        
-        # For now, return a simple team structure
-        # In a real implementation, this would return actual team data
-        return JsonResponse({
-            "success": True,
-            "data": {
-                "teams": [
-                    {
-                        "id": 1,
-                        "name": "Personal Videos",
-                        "description": "Your personal video collection",
-                        "member_count": 1,
-                        "video_count": VideoJob.objects.filter(user=request.user).count(),
-                        "created_at": request.user.date_joined.isoformat()
-                    }
-                ]
-            }
-        })
-        
-    except Exception as e:
-        logger.error(f"Error in teams list: {e}")
-        return JsonResponse({
-            "success": False,
-            "error": "Failed to get teams list"
-        }, status=500)
 
 @extend_schema(
     tags=['Search'],
@@ -1947,6 +1540,11 @@ def api_advanced_search(request):
     try:
         data = json.loads(request.body)
         query = data.get("query", "").strip()
+        username = data.get("username", "").strip()
+
+        target_user = resolve_target_user(username)
+        if target_user is False:
+            return JsonResponse({"error": "User not found"}, status=404)
         
         # Advanced search parameters
         k = data.get("k", 25)
@@ -1961,96 +1559,20 @@ def api_advanced_search(request):
         if not query:
             return JsonResponse({"error": "Query is required"}, status=400)
 
-        search_results = []
-        search_mode = search_type
-        
-        try:
-            if search_type == "enhanced" and enhanced_search and PHASE2_AI_AVAILABLE:
-                # Enhanced search with all features
-                enhanced_results = enhanced_search.search(
-                    query=query,
-                    k=k,
-                    min_similarity=min_similarity,
-                    filter_topics=filter_topics,
-                    diversify_results=diversify,
-                    max_results_per_video=max_per_video
-                )
-                search_results = convert_enhanced_results_to_api_format(enhanced_results)
-                search_mode = "enhanced_advanced"
-                
-            elif search_type == "semantic" and search_engine and search_engine.is_initialized:
-                # Regular semantic search
-                semantic_results = search_engine.semantic_search(query, top_k=k)
-                search_results = convert_semantic_results_to_api_format(semantic_results)
-                search_mode = "semantic"
-                
-            elif search_type == "keyword":
-                # Keyword search
-                keyword_results = perform_keyword_search(query)
-                search_results = convert_keyword_results_to_api_format(keyword_results)
-                search_mode = "keyword"
-                
-            elif search_type == "hybrid":
-                # Hybrid search combining multiple methods
-                hybrid_results = []
-                
-                # Get enhanced results
-                if enhanced_search and PHASE2_AI_AVAILABLE:
-                    try:
-                        enhanced_results = enhanced_search.search(
-                            query=query,
-                            k=k//2,
-                            min_similarity=min_similarity,
-                            diversify_results=diversify,
-                            max_results_per_video=max_per_video
-                        )
-                        hybrid_results.extend(convert_enhanced_results_to_api_format(enhanced_results))
-                    except Exception as e:
-                        logger.warning(f"Enhanced search in hybrid failed: {e}")
-                
-                # Get semantic results
-                if search_engine and search_engine.is_initialized:
-                    try:
-                        semantic_results = search_engine.semantic_search(query, top_k=k//2)
-                        semantic_api_results = convert_semantic_results_to_api_format(semantic_results)
-                        # Avoid duplicates by checking video_id and start_time
-                        existing_keys = set((r["video_id"], r["start_time"]) for r in hybrid_results)
-                        for result in semantic_api_results:
-                            key = (result["video_id"], result["start_time"])
-                            if key not in existing_keys:
-                                hybrid_results.append(result)
-                    except Exception as e:
-                        logger.warning(f"Semantic search in hybrid failed: {e}")
-                
-                # If no results from AI methods, fall back to keyword
-                if not hybrid_results:
-                    keyword_results = perform_keyword_search(query)
-                    hybrid_results = convert_keyword_results_to_api_format(keyword_results)
-                
-                search_results = hybrid_results
-                search_mode = "hybrid"
-                
-            else:
-                # Fallback to best available method
-                if enhanced_search and PHASE2_AI_AVAILABLE:
-                    enhanced_results = enhanced_search.search(query, k=k)
-                    search_results = convert_enhanced_results_to_api_format(enhanced_results)
-                    search_mode = "enhanced_fallback"
-                elif search_engine and search_engine.is_initialized:
-                    semantic_results = search_engine.semantic_search(query, top_k=k)
-                    search_results = convert_semantic_results_to_api_format(semantic_results)
-                    search_mode = "semantic_fallback"
-                else:
-                    keyword_results = perform_keyword_search(query)
-                    search_results = convert_keyword_results_to_api_format(keyword_results)
-                    search_mode = "keyword_fallback"
+        search_results, search_mode = run_advanced_api_search(
+            query,
+            search_engine,
+            enhanced_search,
+            PHASE2_AI_AVAILABLE,
+            search_type,
+            k,
+            min_similarity,
+            diversify,
+            max_per_video,
+            filter_topics,
+        )
 
-        except Exception as e:
-            logger.error(f"Advanced search error: {e}")
-            # Fallback to keyword search
-            keyword_results = perform_keyword_search(query)
-            search_results = convert_keyword_results_to_api_format(keyword_results)
-            search_mode = "keyword_fallback"
+        search_results = filter_api_results_by_user(search_results, target_user)
 
         # Calculate statistics
         video_count = len(set(result.get("video_id") for result in search_results))
@@ -2091,89 +1613,25 @@ def api_advanced_search(request):
         logger.error(f"API advanced search error: {e}")
         return JsonResponse({"error": str(e)}, status=500)
 
-@csrf_exempt
-def api_hybrid_processed_status(request):
-    """Check for processed hybrid batches."""
-    try:
-        processed_dir = Path('./downloads/processed')
-        processed_dir.mkdir(parents=True, exist_ok=True)
-        
-        if not processed_dir.exists():
-            return JsonResponse({
-                'processed_batches': 0,
-                'batches': []
-            })
-        
-        batch_files = list(processed_dir.glob('batch_*.json'))
-        batches = []
-        
-        for batch_file in batch_files:
-            try:
-                with open(batch_file, 'r') as f:
-                    batch_info = json.load(f)
-                    
-                batches.append({
-                    'file_path': str(batch_file),
-                    'batch_name': batch_info.get('batch_name', 'Unknown'),
-                    'created_at': batch_info.get('created_at', 0),
-                    'total_videos': batch_info.get('total_videos', 0),
-                    'processed_at': batch_file.stat().st_mtime  # File modification time
-                })
-            except:
-                continue
-        
-        # Sort by processing time (newest first)
-        batches.sort(key=lambda x: x['processed_at'], reverse=True)
-        
-        return JsonResponse({
-            'processed_batches': len(batches),
-            'batches': batches
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Error checking processed hybrid status: {e}")
-        return JsonResponse({'error': str(e)}, status=500)
 
-@extend_schema(
-    tags=['Videos'],
-    summary='Update video metadata',
-    description='Update video title and YouTube URL for a specific video.',
-    parameters=[
-        OpenApiParameter('job_id', OpenApiTypes.UUID, location=OpenApiParameter.PATH, description='Video job ID')
-    ],
-    request={
-        'application/json': {
-            'type': 'object',
-            'properties': {
-                'title': {'type': 'string', 'description': 'New video title'},
-                'youtube_url': {'type': 'string', 'format': 'uri', 'description': 'YouTube URL'}
-            }
-        }
-    },
-    responses={
-        200: {'description': 'Metadata updated successfully'},
-        404: {'description': 'Video not found'}
-    }
-)
 @csrf_exempt
 def api_update_video_metadata(request, job_id):
     """Update video metadata (title, YouTube URL) for a given job_id."""
-    if request.method != 'POST':
-        return JsonResponse({'error': 'Method not allowed'}, status=405)
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
     try:
-        import json
         data = json.loads(request.body)
-        title = data.get('title', '').strip()
-        youtube_url = data.get('youtube_url', '').strip()
-        from .models import VideoJob
+        title = data.get("title", "").strip()
+        youtube_url = data.get("youtube_url", "").strip()
         video = VideoJob.objects.get(job_id=job_id)
         if title:
             video.video_name = title
             video.title = title
         video.youtube_url = youtube_url or None
         video.save()
-        return JsonResponse({'success': True})
+        return JsonResponse({"success": True})
     except VideoJob.DoesNotExist:
-        return JsonResponse({'error': 'Video not found'}, status=404)
+        return JsonResponse({"error": "Video not found"}, status=404)
     except Exception as e:
-        return JsonResponse({'error': str(e)}, status=500)
+        return JsonResponse({"error": str(e)}, status=500)
+
