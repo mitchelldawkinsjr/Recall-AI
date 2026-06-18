@@ -1,4 +1,4 @@
-# Production stack (VPS): Django + Gunicorn + Postgres + Redis + Celery worker.
+# Production stack (VPS): Django + Gunicorn + Postgres + Redis.
 # App joins `360ws-network` so NPM can reach it by container name (recall-ai-app:8000).
 # Postgres and Redis stay on the internal network only.
 #
@@ -26,8 +26,6 @@ services:
       DJANGO_SETTINGS_MODULE: video_recall_project.settings.production
       DATABASE_URL: postgresql://${DB_USERNAME:-recall}:${DB_PASSWORD}@recall-ai-postgres:5432/${DB_DATABASE:-recall_ai}
       REDIS_URL: redis://recall-ai-redis:6379/0
-      CELERY_BROKER_URL: redis://recall-ai-redis:6379/0
-      CELERY_RESULT_BACKEND: redis://recall-ai-redis:6379/0
       GUNICORN_WORKERS: "1"
       GUNICORN_TIMEOUT: "300"
       HF_HOME: /app/.cache/huggingface
@@ -55,41 +53,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 120s
-
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.prod
-    container_name: recall-ai-worker
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      DJANGO_SETTINGS_MODULE: video_recall_project.settings.production
-      DATABASE_URL: postgresql://${DB_USERNAME:-recall}:${DB_PASSWORD}@recall-ai-postgres:5432/${DB_DATABASE:-recall_ai}
-      REDIS_URL: redis://recall-ai-redis:6379/0
-      CELERY_BROKER_URL: redis://recall-ai-redis:6379/0
-      CELERY_RESULT_BACKEND: redis://recall-ai-redis:6379/0
-      C_FORCE_ROOT: "1"
-      HF_HOME: /app/.cache/huggingface
-      XDG_CACHE_HOME: /app/.cache
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - internal
-    volumes:
-      - media:/app/media
-      - search_cache:/app/search_cache
-      - hf_cache:/app/.cache/huggingface
-      - whisper_cache:/app/.cache/whisper
-    labels:
-      - "com.360ws.app=recall-ai"
-      - "com.360ws.type=docker-app"
-      - "com.360ws.service=worker"
-    command: celery -A video_recall_project worker -l info -c 1 -Q default
 
   postgres:
     image: postgres:15-alpine

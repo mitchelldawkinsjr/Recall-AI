@@ -70,8 +70,9 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
         run: |
           set -e
+          SSH_OPTS="-o ServerAliveInterval=30 -o ServerAliveCountMax=120"
 
-          ssh ${VPS_USER}@${VPS_HOST} 'mkdir -p /opt/360ws/clients/docker-app/recall-ai'
+          ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} 'mkdir -p /opt/360ws/clients/docker-app/recall-ai'
 
           rsync -avz --delete \
             --exclude '.git' \
@@ -98,50 +99,39 @@ jobs:
             --exclude 'task-definition*.json' \
             ./ ${VPS_USER}@${VPS_HOST}:/opt/360ws/clients/docker-app/recall-ai/
 
-          ssh ${VPS_USER}@${VPS_HOST} << 'EOF'
-            set -e
-            cd /opt/360ws/clients/docker-app/recall-ai
+          ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} 'chmod +x /opt/360ws/clients/docker-app/recall-ai/deploy/vps-deploy.sh'
 
-            # Remove stale image archives that bloat build context
-            rm -f .video-processor*.tar.gz* video-processor*.tar.gz db.sqlite3 2>/dev/null || true
+          # Run build on VPS in background so long Docker builds survive SSH disconnects
+          ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} 'nohup /opt/360ws/clients/docker-app/recall-ai/deploy/vps-deploy.sh > /tmp/recall-ai-deploy.log 2>&1 &'
 
-            echo "Building and starting containers..."
-            docker compose -f docker-compose.prod.yml build
-            docker compose -f docker-compose.prod.yml up -d
-
-            echo "Waiting for app to be ready..."
-            sleep 20
-
-            echo "Running migrations..."
-            docker compose -f docker-compose.prod.yml exec -T app python manage.py migrate --noinput || \
-            docker compose -f docker-compose.prod.yml run --rm app python manage.py migrate --noinput
-
-            echo "Collecting static files..."
-            docker compose -f docker-compose.prod.yml exec -T app python manage.py collectstatic --noinput || true
-
-            echo "Health check..."
-            max_attempts=30
-            attempt=0
-            while [ $attempt -lt $max_attempts ]; do
-              if curl -fsS http://localhost:8030/health/ > /dev/null 2>&1; then
-                echo "Health check passed!"
-                break
-              fi
-              attempt=$((attempt + 1))
-              echo "Health check attempt $attempt/$max_attempts failed, retrying..."
-              sleep 5
-            done
-
-            if [ $attempt -eq $max_attempts ]; then
-              echo "Health check failed after $max_attempts attempts."
-              docker compose -f docker-compose.prod.yml logs app --tail=100
+          echo "Waiting for remote deploy (Docker build may take several minutes)..."
+          max_wait=60
+          attempt=0
+          while [ $attempt -lt $max_wait ]; do
+            if ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} 'grep -q DEPLOY_OK /tmp/recall-ai-deploy.log 2>/dev/null'; then
+              ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} 'tail -20 /tmp/recall-ai-deploy.log'
+              echo "Deployment successful!"
+              exit 0
+            fi
+            if ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} 'grep -q DEPLOY_FAILED /tmp/recall-ai-deploy.log 2>/dev/null'; then
+              ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} 'tail -100 /tmp/recall-ai-deploy.log'
               exit 1
             fi
+            if ! ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} 'pgrep -f deploy/vps-deploy.sh >/dev/null 2>&1'; then
+              if ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} 'test -f /tmp/recall-ai-deploy.log'; then
+                ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} 'tail -100 /tmp/recall-ai-deploy.log'
+              fi
+              echo "Remote deploy script exited without success marker."
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            echo "Deploy in progress ($attempt/$max_wait)..."
+            sleep 30
+          done
 
-            docker image prune -f
-            docker compose -f docker-compose.prod.yml ps
-            echo "Deployment successful!"
-          EOF
+          echo "Deploy timed out after $((max_wait * 30)) seconds."
+          ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} 'tail -100 /tmp/recall-ai-deploy.log' || true
+          exit 1
 
       - name: Notify Slack on success
         if: success() && env.SLACK_WEBHOOK != ''
