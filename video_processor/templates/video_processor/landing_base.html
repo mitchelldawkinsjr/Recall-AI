@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Recall AI — find any moment in your videos by meaning, not just keywords. Upload, transcribe, and search with AI.">
+    <title>{% block title %}Recall AI | Intelligent Video Memory{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+    {% include "video_processor/includes/stitch_design.html" %}
+    <style>
+        .landing-nav {
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(14px);
+            border-bottom: 1px solid rgba(0, 39, 83, 0.08);
+        }
+        .hero-glow {
+            background: radial-gradient(circle at 30% 20%, rgba(169, 199, 255, 0.35) 0%, transparent 55%),
+                        radial-gradient(circle at 80% 10%, rgba(255, 221, 103, 0.25) 0%, transparent 45%);
+        }
+        .hero-mockup {
+            transform: perspective(1200px) rotateY(-8deg) rotateX(4deg);
+        }
+        @media (max-width: 1023px) {
+            .hero-mockup { transform: none; }
+        }
+        .step-connector {
+            background: linear-gradient(90deg, rgba(0, 39, 83, 0.15), rgba(0, 39, 83, 0.05));
+        }
+        .feature-icon-wrap {
+            background: linear-gradient(135deg, rgba(214, 227, 255, 0.9) 0%, rgba(255, 255, 255, 1) 100%);
+        }
+        .use-case-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(0, 39, 83, 0.15);
+        }
+        html { scroll-behavior: smooth; }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="theme-cream min-h-screen text-on-surface antialiased">
+    <div class="fixed inset-0 pointer-events-none overflow-hidden z-0" aria-hidden="true">
+        <div class="absolute -top-[15%] -right-[8%] w-[55%] h-[55%] rounded-full bg-primary-fixed opacity-10 blur-[120px]"></div>
+        <div class="absolute top-[40%] -left-[10%] w-[45%] h-[45%] rounded-full bg-secondary-container opacity-20 blur-[100px]"></div>
+    </div>
+
+    <nav class="landing-nav sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-margin-mobile md:px-margin-desktop h-16 flex items-center justify-between gap-md">
+            <a href="{% url 'home' %}" class="flex items-center gap-sm text-primary font-bold shrink-0">
+                <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-primary text-on-primary">
+                    <span class="material-symbols-outlined text-[22px]">memory</span>
+                </span>
+                <span class="text-body-lg hidden sm:inline">Recall AI</span>
+            </a>
+            <div class="hidden md:flex items-center gap-lg text-label-lg text-on-surface-variant">
+                <a href="#features" class="hover:text-primary transition-colors">Features</a>
+                <a href="#use-cases" class="hover:text-primary transition-colors">Use Cases</a>
+                <a href="#demo" class="hover:text-primary transition-colors">Try Demo</a>
+            </div>
+            <div class="flex items-center gap-sm shrink-0">
+                <a href="{% url 'login' %}" class="hidden sm:inline text-label-lg text-primary font-semibold hover:underline px-sm py-xs">Sign In</a>
+                <a href="{% url 'register' %}" class="bg-primary text-on-primary text-label-lg font-bold px-md py-sm rounded-lg hover:opacity-90 transition-opacity shadow-sm">
+                    Get Started
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="relative z-10">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="relative z-10 border-t border-outline-variant/15 bg-surface/40 mt-xl">
+        <div class="max-w-6xl mx-auto px-margin-mobile md:px-margin-desktop py-lg flex flex-col sm:flex-row items-center justify-between gap-md">
+            <div class="flex items-center gap-sm text-primary font-bold">
+                <span class="material-symbols-outlined">memory</span>
+                Recall AI
+            </div>
+            <p class="text-label-md text-on-surface-variant text-center">© {% now "Y" %} Recall AI. Precision Memory Architecture.</p>
+            <div class="flex gap-md text-label-lg">
+                <a href="{% url 'login' %}" class="text-primary font-semibold hover:underline">Sign In</a>
+                <a href="{% url 'register' %}" class="text-primary font-semibold hover:underline">Register</a>
+            </div>
+        </div>
+    </footer>
+
+    {% load static %}
+    <script src="{% static 'video_processor/js/recall-common.js' %}"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

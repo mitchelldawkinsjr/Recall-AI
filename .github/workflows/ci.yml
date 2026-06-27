@@ -35,6 +35,13 @@ jobs:
           DEBUG: "True"
         run: python manage.py migrate --noinput
 
+      - name: Check migrations are committed
+        env:
+          DJANGO_SETTINGS_MODULE: video_recall_project.settings
+          SECRET_KEY: ci-test-secret-key-not-for-production
+          DEBUG: "True"
+        run: python manage.py makemigrations --check --dry-run
+
       - name: Run Django tests
         env:
           DJANGO_SETTINGS_MODULE: video_recall_project.settings
@@ -54,7 +61,6 @@ jobs:
   lint:
     name: Code Quality
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4
@@ -70,12 +76,16 @@ jobs:
         run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
 
       - name: black check
-        run: black --check video_processor/ video_recall_project/ core_video_processor.py whisper_compat.py
-        continue-on-error: true
+        run: |
+          black --check video_processor/ video_recall_project/ \
+            core_video_processor.py whisper_compat.py \
+            semantic_search.py enhanced_semantic_search.py
 
       - name: isort check
-        run: isort --check-only video_processor/ video_recall_project/
-        continue-on-error: true
+        run: |
+          isort --check-only video_processor/ video_recall_project/ \
+            core_video_processor.py whisper_compat.py \
+            semantic_search.py enhanced_semantic_search.py
 
   docker-build:
     name: Docker Build Verify

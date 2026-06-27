@@ -12,7 +12,6 @@ import os
 import subprocess
 import sys
 import tempfile
-
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from enum import Enum
@@ -1028,4 +1027,3 @@ Examples:
 
 if __name__ == "__main__":
     main()
- 

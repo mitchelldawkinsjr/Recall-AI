@@ -6,16 +6,16 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('video_processor', '0003_add_user_multitenancy'),
+        ("video_processor", "0003_add_user_multitenancy"),
     ]
 
     operations = [
         migrations.RemoveIndex(
-            model_name='videojob',
-            name='video_proce_user_id_1e37ca_idx',
+            model_name="videojob",
+            name="video_proce_user_id_1e37ca_idx",
         ),
         migrations.RemoveIndex(
-            model_name='videojob',
-            name='video_proce_user_id_8e6a8a_idx',
+            model_name="videojob",
+            name="video_proce_user_id_8e6a8a_idx",
         ),
     ]

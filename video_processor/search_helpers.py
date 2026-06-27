@@ -1,4 +1,5 @@
 """Search result formatting and shared API search execution."""
+
 from __future__ import annotations
 
 import logging
@@ -33,7 +34,9 @@ def perform_keyword_search(query: str) -> list[dict[str, Any]]:
     return search_results
 
 
-def flatten_keyword_results(keyword_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def flatten_keyword_results(
+    keyword_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     flat = []
     for item in keyword_results:
         video = item.get("video")
@@ -145,13 +148,18 @@ def filter_api_results_by_user(results, user):
         return results
     user_job_ids = {
         str(job_id)
-        for job_id in VideoJob.objects.filter(user=user).values_list("job_id", flat=True)
+        for job_id in VideoJob.objects.filter(user=user).values_list(
+            "job_id", flat=True
+        )
     }
     return [r for r in results if str(r.get("video_id")) in user_job_ids]
 
 
 def _keyword_fallback(query: str) -> tuple[list[dict], str]:
-    return convert_keyword_results_to_api_format(perform_keyword_search(query)), "keyword_fallback"
+    return (
+        convert_keyword_results_to_api_format(perform_keyword_search(query)),
+        "keyword_fallback",
+    )
 
 
 def get_video_segments_for_search():
@@ -183,14 +191,25 @@ def run_legacy_api_search(query, search_mode, search_engine, k=50):
             segments_data = get_video_segments_for_search()
             results = search_engine.hybrid_search(query, segments_data, top_k=k)
             return convert_semantic_results_to_api_format(results), "hybrid"
-        return convert_keyword_results_to_api_format(perform_keyword_search(query)), "keyword"
+        return (
+            convert_keyword_results_to_api_format(perform_keyword_search(query)),
+            "keyword",
+        )
     except Exception as exc:
         logger.error("Legacy search error: %s", exc)
         return _keyword_fallback(query)
 
 
 def run_enhanced_api_search(
-    query, search_engine, enhanced_search, phase2_available, k, min_similarity, diversify, max_per_video, filter_topics
+    query,
+    search_engine,
+    enhanced_search,
+    phase2_available,
+    k,
+    min_similarity,
+    diversify,
+    max_per_video,
+    filter_topics,
 ):
     """api/enhanced-search — enhanced with semantic/keyword fallbacks."""
     try:
@@ -211,7 +230,10 @@ def run_enhanced_api_search(
         if search_engine and search_engine.is_initialized:
             results = search_engine.semantic_search(query, top_k=k)
             return convert_semantic_results_to_api_format(results), "semantic"
-        return convert_keyword_results_to_api_format(perform_keyword_search(query)), "keyword"
+        return (
+            convert_keyword_results_to_api_format(perform_keyword_search(query)),
+            "keyword",
+        )
     except Exception as exc:
         logger.error("Enhanced search error: %s", exc)
         return _keyword_fallback(query)
@@ -240,14 +262,20 @@ def run_advanced_api_search(
                 diversify_results=diversify,
                 max_results_per_video=max_per_video,
             )
-            return convert_enhanced_results_to_api_format(enhanced_results), "enhanced_advanced"
+            return (
+                convert_enhanced_results_to_api_format(enhanced_results),
+                "enhanced_advanced",
+            )
 
         if search_type == "semantic" and search_engine and search_engine.is_initialized:
             results = search_engine.semantic_search(query, top_k=k)
             return convert_semantic_results_to_api_format(results), "semantic"
 
         if search_type == "keyword":
-            return convert_keyword_results_to_api_format(perform_keyword_search(query)), "keyword"
+            return (
+                convert_keyword_results_to_api_format(perform_keyword_search(query)),
+                "keyword",
+            )
 
         if search_type == "hybrid":
             hybrid_results = []
@@ -260,14 +288,22 @@ def run_advanced_api_search(
                         diversify_results=diversify,
                         max_results_per_video=max_per_video,
                     )
-                    hybrid_results.extend(convert_enhanced_results_to_api_format(enhanced_results))
+                    hybrid_results.extend(
+                        convert_enhanced_results_to_api_format(enhanced_results)
+                    )
                 except Exception as exc:
                     logger.warning("Enhanced search in hybrid failed: %s", exc)
             if search_engine and search_engine.is_initialized:
                 try:
-                    semantic_results = search_engine.semantic_search(query, top_k=k // 2)
-                    semantic_api = convert_semantic_results_to_api_format(semantic_results)
-                    existing = {(r["video_id"], r["start_time"]) for r in hybrid_results}
+                    semantic_results = search_engine.semantic_search(
+                        query, top_k=k // 2
+                    )
+                    semantic_api = convert_semantic_results_to_api_format(
+                        semantic_results
+                    )
+                    existing = {
+                        (r["video_id"], r["start_time"]) for r in hybrid_results
+                    }
                     for result in semantic_api:
                         key = (result["video_id"], result["start_time"])
                         if key not in existing:
@@ -276,15 +312,24 @@ def run_advanced_api_search(
                     logger.warning("Semantic search in hybrid failed: %s", exc)
             if hybrid_results:
                 return hybrid_results, "hybrid"
-            return convert_keyword_results_to_api_format(perform_keyword_search(query)), "hybrid"
+            return (
+                convert_keyword_results_to_api_format(perform_keyword_search(query)),
+                "hybrid",
+            )
 
         if enhanced_search and phase2_available:
             enhanced_results = enhanced_search.search(query, k=k)
-            return convert_enhanced_results_to_api_format(enhanced_results), "enhanced_fallback"
+            return (
+                convert_enhanced_results_to_api_format(enhanced_results),
+                "enhanced_fallback",
+            )
         if search_engine and search_engine.is_initialized:
             results = search_engine.semantic_search(query, top_k=k)
             return convert_semantic_results_to_api_format(results), "semantic_fallback"
-        return convert_keyword_results_to_api_format(perform_keyword_search(query)), "keyword_fallback"
+        return (
+            convert_keyword_results_to_api_format(perform_keyword_search(query)),
+            "keyword_fallback",
+        )
 
     except Exception as exc:
         logger.error("Advanced search error: %s", exc)

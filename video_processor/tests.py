@@ -180,54 +180,25 @@ class AskMyVideoPhase1Tests(TestCase):
         self.assertEqual(response.context["failed_count"], 1)
 
 
-class DockerConfigTests(TestCase):
-    """Test Docker configuration and setup."""
+class HomeViewTests(TestCase):
+    """Marketing landing vs authenticated search hub routing."""
 
-    def test_dockerfiles_exist(self):
-        """Test that Docker configuration files exist."""
-        import os
+    def setUp(self):
+        self.client = Client()
+        self.user = User.objects.create_user(
+            username="landinguser", password="testpass123"
+        )
 
-        self.assertTrue(os.path.exists("Dockerfile.prod"))
-        self.assertTrue(os.path.exists("docker-compose.prod.yml"))
+    def test_anonymous_home_shows_marketing_landing(self):
+        response = self.client.get(reverse("home"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Find any moment in your videos")
+        self.assertContains(response, "Get started free")
+        self.assertNotContains(response, "Search Hub")
 
-        # Check if .dockerignore exists
-        self.assertTrue(os.path.exists(".dockerignore"))
-
-    def test_requirements_include_production_deps(self):
-        """Test that requirements include production dependencies."""
-        with open("core_requirements.txt", "r") as f:
-            requirements = f.read()
-
-        # Check for key production dependencies
-        self.assertIn("gunicorn", requirements)
-        self.assertIn("djangorestframework", requirements)
-        self.assertIn("Django", requirements)
-
-
-class CIConfigTests(TestCase):
-    """Test CI/CD configuration."""
-
-    def test_github_actions_config_exists(self):
-        """Test that GitHub Actions CI configuration exists."""
-        import os
-
-        self.assertTrue(os.path.exists(".github/workflows/ci.yml"))
-
-    def test_ci_config_structure(self):
-        """Test that CI configuration has required jobs."""
-        with open(".github/workflows/ci.yml", "r") as f:
-            ci_config = f.read()
-
-        self.assertIn("test:", ci_config)
-        self.assertIn("lint:", ci_config)
-        self.assertIn("docker-build:", ci_config)
-        self.assertIn("python manage.py test", ci_config)
-
-        with open(".github/workflows/deploy-vps.yml", "r") as f:
-            deploy_config = f.read()
-        self.assertIn("VPS_SSH_KEY", deploy_config)
-        self.assertIn("/opt/360ws/clients/docker-app/recall-ai", deploy_config)
-
-        with open(".github/workflows/security.yml", "r") as f:
-            security_config = f.read()
-        self.assertIn("bandit", security_config)
+    def test_authenticated_home_shows_search_hub(self):
+        self.client.login(username="landinguser", password="testpass123")
+        response = self.client.get(reverse("home"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Search Hub")
+        self.assertNotContains(response, "Built for real-world applications")

@@ -6,9 +6,9 @@
       extend: {
         colors: {
           "on-background": "#1a1c20",
-          "surface": "#f9f9fe",
+          "surface": "#ffffff",
           "inverse-surface": "#2f3035",
-          "surface-bright": "#f9f9fe",
+          "surface-bright": "#ffffff",
           "surface-variant": "#e2e2e8",
           "surface-container-highest": "#e2e2e8",
           "surface-container-high": "#e8e8ed",
@@ -18,7 +18,7 @@
           "surface-container-lowest": "#ffffff",
           "outline": "#737781",
           "outline-variant": "#c3c6d1",
-          "background": "#f9f9fe",
+          "background": "#ffffff",
           "primary": "#002753",
           "on-primary": "#ffffff",
           "primary-container": "#083d77",
@@ -52,8 +52,8 @@
           "inverse-on-surface": "#f1f0f6",
           "on-surface": "#1a1c20",
           "on-surface-variant": "#434750",
-          "cream-bg": "#EBEBD3",
-          "luminous-cream": "#F4F4E4"
+          "cream-bg": "#ffffff",
+          "luminous-cream": "#ffffff"
         },
         borderRadius: {
           DEFAULT: "0.25rem",
@@ -95,18 +95,32 @@
         color: #1a1c20;
     }
     body.theme-cream {
-        background-color: #EBEBD3;
+        background-color: #ffffff;
     }
     body.theme-surface {
-        background-color: #f9f9fe;
+        background-color: #ffffff;
     }
     .material-symbols-outlined {
+        font-family: 'Material Symbols Outlined';
+        font-weight: normal;
+        font-style: normal;
+        font-size: 24px;
+        line-height: 1;
+        letter-spacing: normal;
+        text-transform: none;
+        display: inline-block;
+        white-space: nowrap;
+        word-wrap: normal;
+        direction: ltr;
         font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        -webkit-font-feature-settings: 'liga';
+        -webkit-font-smoothing: antialiased;
         vertical-align: middle;
     }
     .luminous-card {
-        background-color: #F4F4E4;
-        border: 1px solid rgba(0, 39, 83, 0.05);
+        background-color: #ffffff;
+        border: 1px solid rgba(0, 39, 83, 0.08);
+        box-shadow: 0 1px 2px rgba(0, 39, 83, 0.04);
     }
     .stat-card-gradient {
         background: linear-gradient(135deg, #ffffff 0%, #f3f3f9 100%);
@@ -115,7 +129,7 @@
         border-bottom: 2px solid #002753;
     }
     .glass-surface {
-        background: rgba(244, 244, 228, 0.85);
+        background: rgba(255, 255, 255, 0.92);
         backdrop-filter: blur(12px);
         border: 1px solid rgba(0, 39, 83, 0.1);
     }
