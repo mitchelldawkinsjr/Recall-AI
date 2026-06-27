@@ -1,5 +1,7 @@
 # Terraform Infrastructure as Code
 
+> **DORMANT** — VPS Docker (`docker-compose.prod.yml`) is the active deploy target. Revive this path when scaling to AWS; see [docs/DEPLOYMENT_AWS.md](../docs/DEPLOYMENT_AWS.md).
+
 This directory contains Terraform configurations for deploying the Video Processor MVP infrastructure to AWS.
 
 ## Prerequisites

@@ -4,6 +4,7 @@ faster-whisper compatibility shim exposing the openai-whisper API.
 Drop-in replacement: anywhere that does `import whisper` can use this
 module instead and get the same .load_model() / .transcribe() interface.
 """
+
 from __future__ import annotations
 
 import logging
@@ -84,17 +85,24 @@ def load_model(name: str, device: str | None = None, **kwargs: Any) -> _CompatMo
 
 def load_audio(file: str, sr: int = 16000) -> np.ndarray:
     cmd = [
-        "ffmpeg", "-nostdin", "-threads", "0",
-        "-i", file, "-f", "s16le", "-ac", "1",
-        "-acodec", "pcm_s16le", "-ar", str(sr), "-",
+        "ffmpeg",
+        "-nostdin",
+        "-threads",
+        "0",
+        "-i",
+        file,
+        "-f",
+        "s16le",
+        "-ac",
+        "1",
+        "-acodec",
+        "pcm_s16le",
+        "-ar",
+        str(sr),
+        "-",
     ]
     result = subprocess.run(cmd, capture_output=True, check=True)
-    return (
-        np.frombuffer(result.stdout, np.int16)
-        .flatten()
-        .astype(np.float32)
-        / 32768.0
-    )
+    return np.frombuffer(result.stdout, np.int16).flatten().astype(np.float32) / 32768.0
 
 
 def pad_or_trim(array: np.ndarray, length: int = 480000) -> np.ndarray:

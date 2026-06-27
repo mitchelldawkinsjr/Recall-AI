@@ -29,7 +29,6 @@ jobs:
 
       - name: Audit production dependencies
         run: pip-audit -r core_requirements.txt --strict --desc on
-        continue-on-error: true
 
   code-scan:
     name: Static Analysis

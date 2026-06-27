@@ -1,0 +1,368 @@
+{% extends "video_processor/landing_base.html" %}
+
+{% block title %}Recall AI | Find Any Moment in Your Videos{% endblock %}
+
+{% block content %}
+<section class="hero-glow relative overflow-hidden">
+    <div class="max-w-6xl mx-auto px-margin-mobile md:px-margin-desktop pt-xl pb-lg md:py-xl">
+        <div class="grid lg:grid-cols-2 gap-xl items-center">
+            <div class="max-w-xl">
+                <p class="inline-flex items-center gap-xs px-md py-xs rounded-full bg-primary/8 text-primary text-label-lg font-semibold mb-md border border-primary/10">
+                    <span class="material-symbols-outlined text-[18px]">auto_awesome</span>
+                    AI-powered video memory
+                </p>
+                <h1 class="text-headline-xl md:text-[56px] md:leading-[64px] text-primary tracking-tight mb-md">
+                    Find any moment in your videos — by meaning, not just keywords.
+                </h1>
+                <p class="text-body-lg text-on-surface-variant mb-lg max-w-lg">
+                    Upload or link your videos, let AI transcribe and index every word, then search in plain English and jump straight to the exact second.
+                </p>
+                <div class="flex flex-wrap gap-sm mb-md">
+                    <a href="{% url 'register' %}"
+                       class="inline-flex items-center gap-xs bg-primary text-on-primary px-lg py-sm rounded-lg font-bold hover:opacity-90 transition-opacity shadow-sm">
+                        Get started free
+                        <span class="material-symbols-outlined text-[20px]">arrow_forward</span>
+                    </a>
+                    <a href="#demo"
+                       class="inline-flex items-center gap-xs luminous-card px-lg py-sm rounded-lg font-bold text-primary hover:border-primary/20 transition-colors">
+                        <span class="material-symbols-outlined text-[20px]">play_circle</span>
+                        Try demo search
+                    </a>
+                </div>
+                <p class="text-body-sm text-on-surface-variant">
+                    Already have an account?
+                    <a href="{% url 'login' %}" class="text-primary font-bold hover:underline">Sign in</a>
+                </p>
+            </div>
+
+            <div class="hero-mockup relative mx-auto w-full max-w-md lg:max-w-none">
+                <div class="luminous-card rounded-2xl p-md shadow-lg border border-primary/10">
+                    <div class="flex items-center gap-sm mb-md pb-sm border-b border-outline-variant/20">
+                        <span class="material-symbols-outlined text-primary">search</span>
+                        <span class="text-body-md text-on-surface-variant italic">"leadership coaching moments"</span>
+                    </div>
+                    <div class="space-y-sm">
+                        <div class="rounded-xl p-sm bg-surface-container-low border border-outline-variant/10 flex gap-sm">
+                            <div class="w-16 h-14 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                                <span class="material-symbols-outlined text-primary opacity-60">play_circle</span>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-start justify-between gap-xs mb-xs">
+                                    <p class="text-body-sm font-bold text-primary truncate">Team Workshop — Q3</p>
+                                    <span class="shrink-0 px-2 py-0.5 bg-primary text-on-primary text-label-md font-bold rounded">94% MATCH</span>
+                                </div>
+                                <p class="text-body-sm text-on-surface-variant line-clamp-2 italic">"...the key to leadership is showing up consistently for your team..."</p>
+                                <p class="text-label-md text-primary font-bold mt-xs flex items-center gap-xs">
+                                    <span class="material-symbols-outlined text-[16px]">schedule</span>
+                                    12:34
+                                </p>
+                            </div>
+                        </div>
+                        <div class="rounded-xl p-sm bg-surface/80 border border-outline-variant/10 flex gap-sm opacity-80">
+                            <div class="w-16 h-14 rounded-lg bg-primary/5 flex items-center justify-center shrink-0">
+                                <span class="material-symbols-outlined text-primary opacity-40">play_circle</span>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <p class="text-body-sm font-bold text-primary truncate mb-xs">Podcast Ep. 42</p>
+                                <p class="text-body-sm text-on-surface-variant line-clamp-1 italic">"...coaching isn't about having all the answers..."</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex gap-xs mt-md">
+                        <span class="px-md py-xs rounded-full text-label-md font-semibold bg-primary text-on-primary">Smart</span>
+                        <span class="px-md py-xs rounded-full text-label-md font-semibold bg-surface-container-high text-on-surface-variant">AI</span>
+                        <span class="px-md py-xs rounded-full text-label-md font-semibold bg-surface-container-high text-on-surface-variant">Keyword</span>
+                    </div>
+                </div>
+                <div class="absolute -bottom-4 -left-4 hidden lg:block luminous-card rounded-xl px-md py-sm shadow-md border border-secondary-container/30">
+                    <p class="text-label-md text-on-surface-variant">Indexed segments</p>
+                    <p class="text-headline-md text-primary font-bold">10,000+</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="how-it-works" class="py-xl bg-surface/30 border-y border-outline-variant/10">
+    <div class="max-w-6xl mx-auto px-margin-mobile md:px-margin-desktop">
+        <div class="text-center max-w-2xl mx-auto mb-xl">
+            <h2 class="text-headline-lg text-primary mb-sm">How it works</h2>
+            <p class="text-body-lg text-on-surface-variant">From raw footage to searchable intelligence in three steps.</p>
+        </div>
+        <div class="grid md:grid-cols-3 gap-gutter relative">
+            <div class="hidden md:block absolute top-12 left-[20%] right-[20%] h-0.5 step-connector -z-10"></div>
+            <div class="luminous-card rounded-xl p-lg text-center">
+                <div class="w-14 h-14 mx-auto mb-md rounded-full bg-primary text-on-primary flex items-center justify-center text-headline-md font-bold">1</div>
+                <span class="material-symbols-outlined text-primary text-[36px] mb-sm">cloud_upload</span>
+                <h3 class="text-headline-md text-primary mb-xs">Upload</h3>
+                <p class="text-body-sm text-on-surface-variant">Drop MP4, MOV, or paste a YouTube URL or playlist. Your library grows automatically.</p>
+            </div>
+            <div class="luminous-card rounded-xl p-lg text-center">
+                <div class="w-14 h-14 mx-auto mb-md rounded-full bg-primary text-on-primary flex items-center justify-center text-headline-md font-bold">2</div>
+                <span class="material-symbols-outlined text-primary text-[36px] mb-sm">transcribe</span>
+                <h3 class="text-headline-md text-primary mb-xs">AI transcribes</h3>
+                <p class="text-body-sm text-on-surface-variant">Whisper-powered speech-to-text breaks every video into searchable segments with timestamps.</p>
+            </div>
+            <div class="luminous-card rounded-xl p-lg text-center">
+                <div class="w-14 h-14 mx-auto mb-md rounded-full bg-primary text-on-primary flex items-center justify-center text-headline-md font-bold">3</div>
+                <span class="material-symbols-outlined text-primary text-[36px] mb-sm">manage_search</span>
+                <h3 class="text-headline-md text-primary mb-xs">Search &amp; jump</h3>
+                <p class="text-body-sm text-on-surface-variant">Ask in natural language, pick Smart, AI, or Keyword mode, and play from the exact moment.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="features" class="py-xl">
+    <div class="max-w-6xl mx-auto px-margin-mobile md:px-margin-desktop">
+        <div class="text-center max-w-2xl mx-auto mb-xl">
+            <h2 class="text-headline-lg text-primary mb-sm">Why Recall AI is different</h2>
+            <p class="text-body-lg text-on-surface-variant">Built for recall — not just search. Every feature helps you find and replay what matters.</p>
+        </div>
+        <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-gutter">
+            <article class="luminous-card rounded-xl p-lg">
+                <div class="feature-icon-wrap w-12 h-12 rounded-lg flex items-center justify-center mb-md">
+                    <span class="material-symbols-outlined text-primary text-[28px]">psychology</span>
+                </div>
+                <h3 class="text-body-lg font-bold text-primary mb-xs">Semantic search</h3>
+                <p class="text-body-sm text-on-surface-variant">Ask "how to stay motivated" and find related moments even when those exact words were never spoken.</p>
+            </article>
+            <article class="luminous-card rounded-xl p-lg">
+                <div class="feature-icon-wrap w-12 h-12 rounded-lg flex items-center justify-center mb-md">
+                    <span class="material-symbols-outlined text-primary text-[28px]">hub</span>
+                </div>
+                <h3 class="text-body-lg font-bold text-primary mb-xs">Hybrid Smart search</h3>
+                <p class="text-body-sm text-on-surface-variant">Combines keyword precision with AI meaning for the best of both worlds — our recommended default.</p>
+            </article>
+            <article class="luminous-card rounded-xl p-lg">
+                <div class="feature-icon-wrap w-12 h-12 rounded-lg flex items-center justify-center mb-md">
+                    <span class="material-symbols-outlined text-primary text-[28px]">schedule</span>
+                </div>
+                <h3 class="text-body-lg font-bold text-primary mb-xs">Timestamp-accurate recall</h3>
+                <p class="text-body-sm text-on-surface-variant">Every result links to the precise second in the video. No scrubbing through hours of footage.</p>
+            </article>
+            <article class="luminous-card rounded-xl p-lg">
+                <div class="feature-icon-wrap w-12 h-12 rounded-lg flex items-center justify-center mb-md">
+                    <span class="material-symbols-outlined text-primary text-[28px]">video_library</span>
+                </div>
+                <h3 class="text-body-lg font-bold text-primary mb-xs">YouTube ingestion</h3>
+                <p class="text-body-sm text-on-surface-variant">Turn single videos or entire playlists into a searchable knowledge base without manual downloads.</p>
+            </article>
+            <article class="luminous-card rounded-xl p-lg">
+                <div class="feature-icon-wrap w-12 h-12 rounded-lg flex items-center justify-center mb-md">
+                    <span class="material-symbols-outlined text-primary text-[28px]">bolt</span>
+                </div>
+                <h3 class="text-body-lg font-bold text-primary mb-xs">Enhanced search</h3>
+                <p class="text-body-sm text-on-surface-variant">Advanced ranking, diversification, and topic-aware results for power users and public demos.</p>
+            </article>
+            <article class="luminous-card rounded-xl p-lg">
+                <div class="feature-icon-wrap w-12 h-12 rounded-lg flex items-center justify-center mb-md">
+                    <span class="material-symbols-outlined text-primary text-[28px]">edit_note</span>
+                </div>
+                <h3 class="text-body-lg font-bold text-primary mb-xs">Editable transcripts</h3>
+                <p class="text-body-sm text-on-surface-variant">Fix transcription errors to improve search quality and keep your library accurate over time.</p>
+            </article>
+        </div>
+    </div>
+</section>
+
+<section id="use-cases" class="py-xl bg-primary text-on-primary">
+    <div class="max-w-6xl mx-auto px-margin-mobile md:px-margin-desktop">
+        <div class="text-center max-w-2xl mx-auto mb-xl">
+            <h2 class="text-headline-lg mb-sm">Built for real-world applications</h2>
+            <p class="text-body-lg text-primary-fixed-dim/90">If you record it, Recall AI helps you find it — fast.</p>
+        </div>
+        <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-gutter">
+            <div class="use-case-card rounded-xl p-lg bg-primary-container/40 border border-primary-fixed-dim/15 transition-all">
+                <span class="material-symbols-outlined text-secondary-container text-[32px] mb-sm">mic</span>
+                <h3 class="text-body-lg font-bold mb-xs">Coaches &amp; creators</h3>
+                <p class="text-body-sm text-primary-fixed-dim/80">Searchable archives of talks, podcasts, courses, and coaching sessions.</p>
+            </div>
+            <div class="use-case-card rounded-xl p-lg bg-primary-container/40 border border-primary-fixed-dim/15 transition-all">
+                <span class="material-symbols-outlined text-secondary-container text-[32px] mb-sm">groups</span>
+                <h3 class="text-body-lg font-bold mb-xs">Teams &amp; meetings</h3>
+                <p class="text-body-sm text-primary-fixed-dim/80">Find decisions, action items, and quotes buried in recorded calls.</p>
+            </div>
+            <div class="use-case-card rounded-xl p-lg bg-primary-container/40 border border-primary-fixed-dim/15 transition-all">
+                <span class="material-symbols-outlined text-secondary-container text-[32px] mb-sm">school</span>
+                <h3 class="text-body-lg font-bold mb-xs">Researchers &amp; students</h3>
+                <p class="text-body-sm text-primary-fixed-dim/80">Search lecture libraries and interviews by concept, not filename.</p>
+            </div>
+            <div class="use-case-card rounded-xl p-lg bg-primary-container/40 border border-primary-fixed-dim/15 transition-all">
+                <span class="material-symbols-outlined text-secondary-container text-[32px] mb-sm">church</span>
+                <h3 class="text-body-lg font-bold mb-xs">Community libraries</h3>
+                <p class="text-body-sm text-primary-fixed-dim/80">Searchable sermon and teaching archives for staff and members.</p>
+            </div>
+            <div class="use-case-card rounded-xl p-lg bg-primary-container/40 border border-primary-fixed-dim/15 transition-all">
+                <span class="material-symbols-outlined text-secondary-container text-[32px] mb-sm">playlist_play</span>
+                <h3 class="text-body-lg font-bold mb-xs">Personal learning</h3>
+                <p class="text-body-sm text-primary-fixed-dim/80">Turn saved YouTube playlists into a library you can actually query.</p>
+            </div>
+            <div class="use-case-card rounded-xl p-lg bg-primary-container/40 border border-primary-fixed-dim/15 transition-all">
+                <span class="material-symbols-outlined text-secondary-container text-[32px] mb-sm">content_cut</span>
+                <h3 class="text-body-lg font-bold mb-xs">Content repurposing</h3>
+                <p class="text-body-sm text-primary-fixed-dim/80">Locate clips, quotes, and highlights for social posts in seconds.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section id="demo" class="py-xl">
+    <div class="max-w-4xl mx-auto px-margin-mobile md:px-margin-desktop">
+        <div class="text-center mb-lg">
+            <h2 class="text-headline-lg text-primary mb-sm">Try it now</h2>
+            <p class="text-body-lg text-on-surface-variant">Search the public demo library — no account required.</p>
+        </div>
+
+        <div class="luminous-card search-container-focus smart-pulse p-xs rounded-xl border-2 border-primary/20 shadow-sm flex flex-col sm:flex-row items-stretch sm:items-center gap-md pr-md mb-md">
+            <div class="bg-primary/5 p-sm rounded-lg flex items-center justify-center shrink-0">
+                <span class="material-symbols-outlined text-primary text-[32px]">auto_awesome</span>
+            </div>
+            <div class="flex-1 p-sm sm:p-0">
+                <div class="flex flex-wrap gap-sm mb-sm">
+                    <button type="button" class="demo-mode-btn px-md py-xs rounded-full text-label-md font-semibold bg-primary text-on-primary" data-mode="hybrid">Smart</button>
+                    <button type="button" class="demo-mode-btn px-md py-xs rounded-full text-label-md font-semibold bg-surface-container-high text-on-surface-variant hover:text-primary" data-mode="semantic">AI</button>
+                    <button type="button" class="demo-mode-btn px-md py-xs rounded-full text-label-md font-semibold bg-surface-container-high text-on-surface-variant hover:text-primary" data-mode="keyword">Keyword</button>
+                </div>
+                <input id="demoSearchQuery" type="text"
+                       class="w-full bg-transparent border-none focus:ring-0 text-headline-md placeholder:text-outline-variant p-0"
+                       placeholder="Describe a moment or keyword from videos..." autocomplete="off">
+            </div>
+            <button id="demoSearchButton" type="button"
+                    class="bg-primary text-on-primary px-lg py-sm rounded-lg font-bold flex items-center justify-center gap-xs hover:opacity-90 transition-opacity shrink-0 m-sm sm:m-0">
+                Search
+            </button>
+        </div>
+
+        <div class="flex flex-wrap gap-sm mb-lg justify-center">
+            <button type="button" class="demo-example px-md py-xs bg-surface-container-high text-on-surface-variant rounded-full text-label-md font-semibold hover:bg-primary hover:text-on-primary transition-all">leadership coaching</button>
+            <button type="button" class="demo-example px-md py-xs bg-surface-container-high text-on-surface-variant rounded-full text-label-md font-semibold hover:bg-primary hover:text-on-primary transition-all">product demo pricing</button>
+            <button type="button" class="demo-example px-md py-xs bg-surface-container-high text-on-surface-variant rounded-full text-label-md font-semibold hover:bg-primary hover:text-on-primary transition-all">motivation and habits</button>
+        </div>
+
+        <div id="demoResultsSection" class="hidden">
+            <div class="flex items-center justify-between mb-md">
+                <p class="text-body-md text-on-surface-variant" id="demoResultsInfo"></p>
+                <span id="demoModeBadge" class="px-md py-xs bg-primary/10 text-primary rounded-full text-label-md font-bold"></span>
+            </div>
+            <div id="demoResultsGrid" class="grid gap-gutter"></div>
+        </div>
+
+        <p class="text-center text-body-sm text-on-surface-variant mt-lg">
+            Want your own library?
+            <a href="{% url 'register' %}" class="text-primary font-bold hover:underline">Create a free account</a>
+            or try
+            <a href="{% url 'public_enhanced_search' %}" class="text-primary font-bold hover:underline">Enhanced Search</a>.
+        </p>
+    </div>
+</section>
+
+<section class="py-xl bg-surface/40 border-t border-outline-variant/10">
+    <div class="max-w-3xl mx-auto px-margin-mobile md:px-margin-desktop text-center">
+        <h2 class="text-headline-lg text-primary mb-sm">Start building your video memory</h2>
+        <p class="text-body-lg text-on-surface-variant mb-lg">Upload your first video and search it in minutes — not hours.</p>
+        <div class="flex flex-wrap justify-center gap-sm">
+            <a href="{% url 'register' %}"
+               class="inline-flex items-center gap-xs bg-primary text-on-primary px-xl py-sm rounded-lg font-bold hover:opacity-90 transition-opacity shadow-sm">
+                Create free account
+                <span class="material-symbols-outlined text-[20px]">person_add</span>
+            </a>
+            <a href="{% url 'login' %}"
+               class="inline-flex items-center gap-xs luminous-card px-xl py-sm rounded-lg font-bold text-primary hover:border-primary/20 transition-colors">
+                Sign in
+            </a>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let demoMode = 'hybrid';
+
+document.querySelectorAll('.demo-mode-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        document.querySelectorAll('.demo-mode-btn').forEach(b => {
+            b.classList.remove('bg-primary', 'text-on-primary');
+            b.classList.add('bg-surface-container-high', 'text-on-surface-variant');
+        });
+        this.classList.add('bg-primary', 'text-on-primary');
+        this.classList.remove('bg-surface-container-high', 'text-on-surface-variant');
+        demoMode = this.dataset.mode;
+    });
+});
+
+document.querySelectorAll('.demo-example').forEach(el => {
+    el.addEventListener('click', () => {
+        document.getElementById('demoSearchQuery').value = el.textContent.trim();
+        performDemoSearch();
+    });
+});
+
+document.getElementById('demoSearchButton').addEventListener('click', performDemoSearch);
+document.getElementById('demoSearchQuery').addEventListener('keypress', e => {
+    if (e.key === 'Enter') performDemoSearch();
+});
+
+async function performDemoSearch() {
+    const query = document.getElementById('demoSearchQuery').value.trim();
+    if (!query) return;
+
+    const btn = document.getElementById('demoSearchButton');
+    const section = document.getElementById('demoResultsSection');
+    const grid = document.getElementById('demoResultsGrid');
+    const info = document.getElementById('demoResultsInfo');
+    const badge = document.getElementById('demoModeBadge');
+
+    btn.disabled = true;
+    btn.textContent = 'Searching...';
+    section.classList.remove('hidden');
+    grid.innerHTML = '<div class="luminous-card rounded-xl p-xl text-center text-on-surface-variant">Searching through indexed videos...</div>';
+
+    try {
+        const response = await fetch('/api/search/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+            body: JSON.stringify({ query, search_mode: demoMode })
+        });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Search failed');
+
+        const count = data.count || data.total_results || 0;
+        info.textContent = `${count} results for "${data.query}"`;
+        badge.textContent = data.mode || data.search_mode || demoMode;
+
+        if (!data.results.length) {
+            grid.innerHTML = '<div class="luminous-card rounded-xl p-xl text-center"><h3 class="text-headline-md text-primary mb-sm">No results found</h3><p class="text-on-surface-variant">Try different keywords or switch search modes.</p></div>';
+        } else {
+            grid.innerHTML = data.results.map(result => {
+                const score = result.relevance_score ? Math.round(result.relevance_score * 100) : null;
+                return `
+                <div class="luminous-card rounded-xl overflow-hidden flex flex-col md:flex-row p-md gap-md hover:border-primary/20 transition-all">
+                    <div class="md:w-48 h-32 bg-surface-container rounded-lg flex items-center justify-center shrink-0 relative">
+                        <span class="material-symbols-outlined text-primary text-[48px] opacity-40">play_circle</span>
+                        ${score ? `<span class="absolute top-2 right-2 px-2 py-0.5 bg-primary text-on-primary text-label-md font-bold rounded">${score}% MATCH</span>` : ''}
+                    </div>
+                    <div class="flex-1 flex flex-col justify-between">
+                        <div>
+                            <h4 class="text-body-lg font-bold text-primary mb-xs">${result.video_name}</h4>
+                            <p class="text-on-surface-variant text-body-sm line-clamp-2 italic border-l-2 border-outline-variant/30 pl-sm">${result.text}</p>
+                        </div>
+                        <button type="button" onclick="playSegment('${result.video_id}', ${result.start_time})"
+                                class="mt-sm text-primary font-bold hover:underline flex items-center gap-xs self-start">
+                            <span class="material-symbols-outlined text-[18px]">play_arrow</span>
+                            ${formatTime(result.start_time)}
+                        </button>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+    } catch (error) {
+        grid.innerHTML = `<div class="rounded-xl p-md alert-error">${error.message}</div>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Search';
+    }
+}
+</script>
+{% endblock %}

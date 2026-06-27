@@ -6,15 +6,15 @@ preview: https://stitch.withgoogle.com/preview/12113312558662173038
 
 # Recall AI Design System (Light Theme)
 
-Synced from Stitch HTML exports (Search Hub, Enhanced Search, My Library, Login).
+Synced from Stitch HTML exports (Search Hub, Enhanced Search, My Library, Login, Marketing Landing).
 
 ## Core surfaces
 
 | Token | Hex | Usage |
 |-------|-----|-------|
-| cream-bg | `#EBEBD3` | Page background (Search Hub, Enhanced Search, Auth) |
-| background / surface | `#f9f9fe` | Page background (Library, Upload) |
-| luminous-cream | `#F4F4E4` | Cards, filter panels, inputs |
+| cream-bg | `#ffffff` | Page background (Search Hub, Enhanced Search, Auth, Landing) |
+| background / surface | `#ffffff` | Page background (Library, Upload) |
+| luminous-cream | `#ffffff` | Cards, filter panels, inputs |
 | primary | `#002753` | Headlines, buttons, sidebar, match badges |
 | on-primary | `#ffffff` | Text on primary surfaces |
 | on-surface | `#1a1c20` | Body text |

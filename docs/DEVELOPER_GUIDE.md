@@ -183,14 +183,18 @@ completed_videos = VideoJob.objects.filter(status=JobStatus.COMPLETED)
 ### Running Tests
 
 ```bash
-pytest
+python manage.py test video_processor --verbosity=2
 ```
+
+CI also runs `python manage.py makemigrations --check --dry-run`.
 
 ### Code Style
 
 The project uses:
 - **Black**: Code formatting
 - **isort**: Import sorting
+- **flake8**: Critical syntax errors (E9, F63, F7, F82)
+- **pre-commit** (optional): `pip install pre-commit && pre-commit install`
 
 ```bash
 black .

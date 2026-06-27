@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Enhanced Startup script for Video Processor MVP
-# Designed for ECS Fargate with proper error handling and logging
+# Startup script for AskMyVideo / recall-ai (VPS Docker production)
+# For dormant ECS/RDS startup notes see docs/DEPLOYMENT_AWS.md
 
 set -euo pipefail
 
@@ -138,22 +138,30 @@ fi
 
 # Create superuser if it doesn't exist (non-blocking)
 log "👤 Checking superuser..."
+if [[ "${DJANGO_SETTINGS_MODULE:-}" == *production* ]] && [ -z "${ADMIN_PASSWORD:-}" ]; then
+    log_error "ADMIN_PASSWORD is not set; skipping superuser creation in production"
+else
 python manage.py shell -c "
 from django.contrib.auth.models import User
 import os
 if not User.objects.filter(username='admin').exists():
-    try:
-        User.objects.create_superuser(
-            'admin',
-            os.environ.get('ADMIN_EMAIL', 'admin@example.com'),
-            os.environ.get('ADMIN_PASSWORD', 'admin123')
-        )
-        print('✅ Superuser created: admin')
-    except Exception as e:
-        print(f'⚠️  Superuser creation failed: {e}')
+    admin_password = os.environ.get('ADMIN_PASSWORD')
+    if not admin_password:
+        print('ℹ️  Skipping superuser creation: ADMIN_PASSWORD not set')
+    else:
+        try:
+            User.objects.create_superuser(
+                'admin',
+                os.environ.get('ADMIN_EMAIL', 'admin@example.com'),
+                admin_password
+            )
+            print('✅ Superuser created: admin')
+        except Exception as e:
+            print(f'⚠️  Superuser creation failed: {e}')
 else:
     print('ℹ️  Superuser already exists')
 " 2>&1 || log "⚠️  Superuser check failed, continuing..."
+fi
 
 # Pre-warm application (load AI models in background if needed)
 log "🔥 Pre-warming application..."

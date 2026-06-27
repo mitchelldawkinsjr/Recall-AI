@@ -28,7 +28,7 @@ async function playSegment(videoId, timestamp) {
     const overlay = document.createElement('div');
     overlay.className = 'video-overlay';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:10000;display:flex;align-items:center;justify-content:center;';
-    overlay.innerHTML = '<div style="background:#F4F4E4;color:#1a1c20;border-radius:15px;padding:40px;text-align:center;"><p>Loading video player...</p></div>';
+    overlay.innerHTML = '<div style="background:#ffffff;color:#1a1c20;border-radius:15px;padding:40px;text-align:center;"><p>Loading video player...</p></div>';
     document.body.appendChild(overlay);
 
     try {
@@ -61,7 +61,7 @@ async function playSegment(videoId, timestamp) {
         }
 
         overlay.innerHTML = `
-            <div style="background:#F4F4E4;border-radius:15px;padding:24px;max-width:900px;width:95%;">
+            <div style="background:#ffffff;border-radius:15px;padding:24px;max-width:900px;width:95%;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
                     <h3 style="margin:0;color:#002753;">${videoData.video_name}</h3>
                     <button onclick="closeVideoPlayer()" style="background:#ba1a1a;color:white;border:none;border-radius:50%;width:36px;height:36px;cursor:pointer;">×</button>
@@ -70,7 +70,7 @@ async function playSegment(videoId, timestamp) {
             </div>`;
     } catch (error) {
         overlay.innerHTML = `
-            <div style="background:#F4F4E4;border-radius:15px;padding:40px;text-align:center;max-width:500px;">
+            <div style="background:#ffffff;border-radius:15px;padding:40px;text-align:center;max-width:500px;">
                 <h3 style="color:#93000a;">Error Loading Video</h3>
                 <p>${error.message}</p>
                 <button onclick="closeVideoPlayer()" style="margin-top:16px;background:#002753;color:white;padding:10px 20px;border:none;border-radius:8px;cursor:pointer;">Close</button>

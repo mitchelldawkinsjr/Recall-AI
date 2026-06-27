@@ -323,7 +323,11 @@ class EnhancedSemanticSearchEngine:
             faiss.normalize_L2(query_embedding)
 
             # Search index - get more results for filtering and diversification
-            search_k = min(k * 3, len(self.segments)) if diversify_results else min(k * 2, len(self.segments))
+            search_k = (
+                min(k * 3, len(self.segments))
+                if diversify_results
+                else min(k * 2, len(self.segments))
+            )
             similarities, indices = self.index.search(
                 query_embedding.astype("float32"),
                 search_k,
@@ -383,25 +387,25 @@ class EnhancedSemanticSearchEngine:
             return []
 
     def _diversify_results(
-        self, 
-        all_results: List[EnhancedSearchResult], 
-        k: int, 
-        max_results_per_video: int
+        self,
+        all_results: List[EnhancedSearchResult],
+        k: int,
+        max_results_per_video: int,
     ) -> List[EnhancedSearchResult]:
         """
         Diversify search results to ensure good distribution across videos.
-        
+
         Args:
             all_results: All search results sorted by relevance
             k: Number of results to return
             max_results_per_video: Maximum results per video
-            
+
         Returns:
             Diversified list of results
         """
         if not all_results:
             return []
-            
+
         # Group results by video
         video_groups = {}
         for result in all_results:
@@ -409,50 +413,55 @@ class EnhancedSemanticSearchEngine:
             if video_id not in video_groups:
                 video_groups[video_id] = []
             video_groups[video_id].append(result)
-        
+
         # Sort each video's results by confidence score
         for video_id in video_groups:
             video_groups[video_id].sort(key=lambda x: x.confidence_score, reverse=True)
-        
+
         # Diversified selection algorithm
         diversified_results = []
         selected_videos = set()
-        
+
         # First pass: take top result from each video
         for video_id, results in video_groups.items():
             if len(diversified_results) >= k:
                 break
             diversified_results.append(results[0])
             selected_videos.add(video_id)
-        
+
         # Second pass: add more results from videos that have high-quality matches
         # Sort videos by their best result's confidence score
         video_quality = {}
         for video_id, results in video_groups.items():
             if results:
                 video_quality[video_id] = results[0].confidence_score
-        
+
         # Sort videos by quality (best first)
         sorted_videos = sorted(video_quality.items(), key=lambda x: x[1], reverse=True)
-        
+
         # Add additional results from high-quality videos
         for video_id, _ in sorted_videos:
             if len(diversified_results) >= k:
                 break
-                
+
             results = video_groups[video_id]
-            current_count = sum(1 for r in diversified_results if r.video_id == video_id)
-            
+            current_count = sum(
+                1 for r in diversified_results if r.video_id == video_id
+            )
+
             # Add more results from this video if we haven't reached the limit
             for i in range(1, min(max_results_per_video, len(results))):
-                if current_count >= max_results_per_video or len(diversified_results) >= k:
+                if (
+                    current_count >= max_results_per_video
+                    or len(diversified_results) >= k
+                ):
                     break
                 diversified_results.append(results[i])
                 current_count += 1
-        
+
         # Sort final results by confidence score
         diversified_results.sort(key=lambda x: x.confidence_score, reverse=True)
-        
+
         return diversified_results[:k]
 
     def get_semantic_similar_segments(
@@ -543,4 +552,3 @@ enhanced_search_engine = EnhancedSemanticSearchEngine()
 def get_enhanced_search_engine():
     """Get the global enhanced search engine instance."""
     return enhanced_search_engine
- 

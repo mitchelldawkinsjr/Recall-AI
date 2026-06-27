@@ -1,6 +1,6 @@
+import re
 import uuid
 from pathlib import Path
-import re
 
 from django.contrib.auth.models import User
 from django.db import models
@@ -28,7 +28,7 @@ class VideoJob(models.Model):
     # Multi-tenancy: Add user ownership
     # Note: User must be explicitly provided when creating VideoJob instances
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    
+
     # Video information (removed playlist field completely)
     video_path = models.CharField(max_length=500, help_text="Path to the video file")
     video_name = models.CharField(max_length=500, help_text="Original video filename")

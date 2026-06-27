@@ -1,6 +1,5 @@
-# Production stack (VPS): Django + Gunicorn + Postgres + Redis.
+# Production stack (VPS): Django + Gunicorn + Postgres.
 # App joins `360ws-network` so NPM can reach it by container name (recall-ai-app:8000).
-# Postgres and Redis stay on the internal network only.
 #
 # Prerequisites on the host: `docker network create 360ws-network` (already exists)
 # Deploy path: /opt/360ws/clients/docker-app/recall-ai
@@ -25,15 +24,12 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: video_recall_project.settings.production
       DATABASE_URL: postgresql://${DB_USERNAME:-recall}:${DB_PASSWORD}@recall-ai-postgres:5432/${DB_DATABASE:-recall_ai}
-      REDIS_URL: redis://recall-ai-redis:6379/0
       GUNICORN_WORKERS: "1"
       GUNICORN_TIMEOUT: "300"
       HF_HOME: /app/.cache/huggingface
       XDG_CACHE_HOME: /app/.cache
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     networks:
       - internal
@@ -77,25 +73,6 @@ services:
       retries: 5
       start_period: 15s
 
-  redis:
-    image: redis:7-alpine
-    container_name: recall-ai-redis
-    restart: unless-stopped
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
-    networks:
-      - internal
-    volumes:
-      - redis_data:/data
-    labels:
-      - "com.360ws.app=recall-ai"
-      - "com.360ws.type=docker-app"
-      - "com.360ws.service=redis"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
 networks:
   internal:
     driver: bridge
@@ -105,7 +82,6 @@ networks:
 
 volumes:
   postgres_data:
-  redis_data:
   media:
   search_cache:
   hf_cache:

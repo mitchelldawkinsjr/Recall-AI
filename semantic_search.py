@@ -420,4 +420,3 @@ class SemanticSearchEngine:
 
 # Global search engine instance
 search_engine = SemanticSearchEngine()
- 

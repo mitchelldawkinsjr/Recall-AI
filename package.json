@@ -1,0 +1,9 @@
+{
+  "name": "recall-ai",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "devDependencies": {
+    "@cursor/sdk": "^1.0.18"
+  }
+}

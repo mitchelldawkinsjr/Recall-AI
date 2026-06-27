@@ -4,25 +4,51 @@ on:
   push:
     branches: [main]
     paths:
-      - "video_processor/**"
-      - "video_recall_project/**"
+      - "**/*.py"
+      - "**/*.html"
       - "core_requirements.txt"
       - "requirements-ci.txt"
-      - "core_video_processor.py"
-      - "whisper_compat.py"
-      - "semantic_search.py"
-      - "enhanced_semantic_search.py"
       - "Dockerfile.prod"
       - "docker-compose.prod.yml"
       - "startup.sh"
       - "deploy/**"
       - ".github/workflows/deploy-vps.yml"
-      - ".github/workflows/ci.yml"
   workflow_dispatch:
 
 jobs:
+  secrets-check:
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - name: Check VPS secrets
+        id: check
+        run: |
+          if [ -n "${{ secrets.VPS_SSH_KEY }}" ] && [ -n "${{ secrets.VPS_HOST }}" ] && [ -n "${{ secrets.VPS_USER }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Warn when secrets are missing
+        if: steps.check.outputs.configured != 'true' && github.event_name == 'push'
+        run: |
+          echo "::warning::VPS deploy skipped. Add repository secrets VPS_SSH_KEY, VPS_HOST, and VPS_USER, then re-run this workflow from Actions."
+
+  secrets-required:
+    needs: secrets-check
+    if: needs.secrets-check.outputs.configured != 'true' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail — VPS secrets not configured
+        run: |
+          echo "::error::Add VPS_SSH_KEY, VPS_HOST, and VPS_USER under Settings → Secrets and variables → Actions."
+          exit 1
+
   test:
     name: Pre-deploy tests
+    needs: secrets-check
+    if: needs.secrets-check.outputs.configured == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -46,11 +72,13 @@ jobs:
           DEBUG: "True"
         run: |
           python manage.py migrate --noinput
+          python manage.py makemigrations --check --dry-run
           python manage.py test video_processor --verbosity=1
 
   deploy:
     name: Deploy recall-ai to mitch-cloud
-    needs: test
+    needs: [secrets-check, test]
+    if: needs.secrets-check.outputs.configured == 'true'
     runs-on: ubuntu-latest
     env:
       SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
@@ -101,7 +129,6 @@ jobs:
 
           ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} 'chmod +x /opt/360ws/clients/docker-app/recall-ai/deploy/vps-deploy.sh'
 
-          # Run build on VPS in background so long Docker builds survive SSH disconnects
           ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} 'nohup /opt/360ws/clients/docker-app/recall-ai/deploy/vps-deploy.sh > /tmp/recall-ai-deploy.log 2>&1 &'
 
           echo "Waiting for remote deploy (Docker build may take several minutes)..."
