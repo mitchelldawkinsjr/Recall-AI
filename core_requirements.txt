@@ -1,40 +1,41 @@
 # Core AskMyVideo / recall-ai production requirements
 
 # Django web
-Django==4.2.23
-Pillow==10.0.0
-gunicorn==21.2.0
+Django==4.2.30
+Pillow==12.2.0
+gunicorn==23.0.0
 whitenoise[brotli]==6.7.0
 
 # Database
 dj-database-url==2.1.0
-psycopg2-binary==2.9.7
+psycopg2-binary==2.9.10
 
 # API + OpenAPI docs
-django-cors-headers==4.2.0
-djangorestframework==3.14.0
-drf-spectacular==0.27.0
+django-cors-headers==4.6.0
+djangorestframework==3.16.0
+drf-spectacular==0.28.0
 
 # Video processing
-opencv-python-headless>=4.8.0
-yt-dlp>=2024.12.0
-faster-whisper>=1.0.0
+opencv-python-headless>=4.10.0
+yt-dlp>=2026.6.9
+faster-whisper>=1.1.0
 
 # ML / search
-torch>=2.0.0,<2.4.0
-transformers==4.44.0
-sentence-transformers==2.7.0
-huggingface-hub==0.24.0
-faiss-cpu==1.7.4
-numpy>=1.24.0,<2.0
+torch>=2.11.0,<2.13.0
+transformers>=5.0.0,<6.0.0
+sentence-transformers>=3.4.0
+huggingface-hub>=0.29.0
+faiss-cpu==1.9.0.post1
+numpy>=1.26.0,<3.0
 
-python-dotenv==1.0.0
+python-dotenv==1.2.2
 
 # AWS / monitoring (optional at runtime)
-django-storages==1.13.2
-boto3==1.28.0
-sentry-sdk==1.32.0
+django-storages==1.14.4
+boto3>=1.35.0
+sentry-sdk>=2.29.0
 
-# Dev / test (included for CI)
-pytest==7.4.0
-pytest-django==4.5.2
+# Transitive dependency floors (security)
+urllib3>=2.6.3
+requests>=2.33.0
+filelock>=3.20.3

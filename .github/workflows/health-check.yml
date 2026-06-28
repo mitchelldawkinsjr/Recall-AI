@@ -17,15 +17,14 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
-      - run: ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
-
       - name: Health check via SSH
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
         run: |
           set -e
-          ssh ${VPS_USER}@${VPS_HOST} << 'EOF'
+          SSH_OPTS="-o StrictHostKeyChecking=accept-new"
+          ssh $SSH_OPTS ${VPS_USER}@${VPS_HOST} << 'EOF'
             set -e
             cd /opt/360ws/clients/docker-app/recall-ai
 
