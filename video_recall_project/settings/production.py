@@ -85,9 +85,9 @@ if os.environ.get("USE_S3", "False").lower() == "true":
 else:
     # Local file storage with WhiteNoise compression
     STATIC_URL = "/static/"
-    STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
+    STATIC_ROOT = BASE_DIR / "staticfiles"
     MEDIA_URL = "/media/"
-    MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+    MEDIA_ROOT = BASE_DIR / "media"
     STORAGES = {
         "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
         "staticfiles": {

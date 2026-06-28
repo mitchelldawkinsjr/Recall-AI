@@ -7,6 +7,7 @@ from django.test import RequestFactory, SimpleTestCase, TestCase
 
 from .youtube_utils import (
     MAX_PLAYLIST_VIDEOS,
+    build_ytdlp_opts,
     download_youtube_video,
     is_youtube_playlist_url,
     is_youtube_video_url,
@@ -35,6 +36,29 @@ class YouTubeUrlValidationTests(SimpleTestCase):
 
     def test_rejects_non_http_scheme(self):
         self.assertFalse(is_youtube_video_url("ftp://youtube.com/watch?v=abc"))
+
+
+class BuildYtdlpOptsTests(SimpleTestCase):
+    def test_includes_android_web_player_clients(self):
+        opts = build_ytdlp_opts()
+        self.assertIn("android", opts["extractor_args"]["youtube"]["player_client"])
+
+    def test_merges_extractor_args(self):
+        opts = build_ytdlp_opts(
+            extract_flat=True,
+            extractor_args={"youtube": {"skip": ["dash", "hls"]}},
+        )
+        self.assertTrue(opts["extract_flat"])
+        self.assertIn("player_client", opts["extractor_args"]["youtube"])
+        self.assertEqual(opts["extractor_args"]["youtube"]["skip"], ["dash", "hls"])
+
+    def test_uses_cookies_file_when_present(self):
+        with TemporaryDirectory() as tmpdir:
+            cookies = Path(tmpdir) / "cookies.txt"
+            cookies.write_text("# Netscape HTTP Cookie File\n")
+            with patch.dict("os.environ", {"YOUTUBE_COOKIES_FILE": str(cookies)}):
+                opts = build_ytdlp_opts()
+            self.assertEqual(opts["cookiefile"], str(cookies))
 
 
 class DurationNormalizationTests(SimpleTestCase):

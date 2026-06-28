@@ -36,6 +36,7 @@ from core_video_processor import CoreVideoProcessor
 from .models import JobStatus, VideoJob, VideoSearchQuery
 from .youtube_utils import (
     MAX_PLAYLIST_VIDEOS,
+    build_ytdlp_opts,
     download_youtube_video,
     is_youtube_playlist_url,
     is_youtube_video_url,
@@ -130,19 +131,10 @@ def start_video_job_thread(job_id):
 def extract_playlist_videos(playlist_url):
     """Extract video URLs from a YouTube playlist."""
     try:
-        # Enhanced yt-dlp options for better network handling
-        ydl_opts = {
-            "extract_flat": True,
-            "quiet": True,
-            "no_warnings": True,
-            "socket_timeout": 30,
-            "retries": 5,
-            "fragment_retries": 5,
-            "http_headers": {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            },
-            "extractor_args": {"youtube": {"skip": ["dash", "hls"]}},
-        }
+        ydl_opts = build_ytdlp_opts(
+            extract_flat=True,
+            extractor_args={"youtube": {"skip": ["dash", "hls"]}},
+        )
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             logger.info(f"Extracting playlist: {playlist_url}")
@@ -404,7 +396,7 @@ def upload_video(request):
 
     try:
         # Save video file to media directory
-        media_videos_dir = settings.MEDIA_ROOT / "videos"
+        media_videos_dir = Path(settings.MEDIA_ROOT) / "videos"
         media_videos_dir.mkdir(parents=True, exist_ok=True)
 
         # Create unique filename to avoid conflicts
@@ -1209,7 +1201,7 @@ def process_video_job(job_id):
 
             if job.youtube_url and not job.video_path:
                 logger.info(f"Downloading YouTube video: {job.youtube_url}")
-                media_videos_dir = settings.MEDIA_ROOT / "videos"
+                media_videos_dir = Path(settings.MEDIA_ROOT) / "videos"
                 success, video_path, video_info, error_msg = download_youtube_video(
                     job.youtube_url, media_videos_dir
                 )

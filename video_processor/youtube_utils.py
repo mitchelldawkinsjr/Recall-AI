@@ -1,6 +1,7 @@
 """YouTube URL validation and download helpers."""
 
 import logging
+import os
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -14,6 +15,12 @@ MAX_VIDEO_DURATION_SECONDS = 3600
 
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mkv", ".mov", ".m4v", ".avi"}
 
+DEFAULT_YT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
 YOUTUBE_HOSTS = frozenset(
     {
         "youtube.com",
@@ -24,6 +31,37 @@ YOUTUBE_HOSTS = frozenset(
         "www.youtu.be",
     }
 )
+
+
+def build_ytdlp_opts(**overrides):
+    """Shared yt-dlp options for prod VPS downloads (bot checks, retries, cookies)."""
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "socket_timeout": 30,
+        "retries": 5,
+        "fragment_retries": 5,
+        "http_headers": {"User-Agent": DEFAULT_YT_USER_AGENT},
+        # android/web clients reduce bot-check failures on server IPs
+        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+    }
+
+    cookies_file = os.environ.get("YOUTUBE_COOKIES_FILE", "").strip()
+    if cookies_file:
+        cookie_path = Path(cookies_file)
+        if cookie_path.is_file():
+            opts["cookiefile"] = str(cookie_path)
+            logger.info("Using YouTube cookies from %s", cookie_path)
+        else:
+            logger.warning("YOUTUBE_COOKIES_FILE set but not found: %s", cookies_file)
+
+    extra_extractor = overrides.pop("extractor_args", None)
+    if extra_extractor:
+        youtube_args = opts.setdefault("extractor_args", {}).setdefault("youtube", {})
+        youtube_args.update(extra_extractor.get("youtube", {}))
+
+    opts.update(overrides)
+    return opts
 
 
 def normalize_duration(raw):
@@ -101,13 +139,12 @@ def download_youtube_video(url, output_path):
         output_path = Path(output_path)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        ydl_opts = {
-            "format": "best[ext=mp4]/best",
-            "outtmpl": str(output_path / "%(id)s_%(title)s.%(ext)s"),
-            "restrictfilenames": True,
-            "noplaylist": True,
-            "quiet": True,
-        }
+        ydl_opts = build_ytdlp_opts(
+            format="best[ext=mp4]/best",
+            outtmpl=str(output_path / "%(id)s_%(title)s.%(ext)s"),
+            restrictfilenames=True,
+            noplaylist=True,
+        )
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
