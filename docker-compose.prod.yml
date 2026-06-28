@@ -39,6 +39,7 @@ services:
       - search_cache:/app/search_cache
       - hf_cache:/app/.cache/huggingface
       - whisper_cache:/app/.cache/whisper
+      - ./secrets:/app/secrets:ro
     labels:
       - "com.360ws.app=recall-ai"
       - "com.360ws.type=docker-app"
