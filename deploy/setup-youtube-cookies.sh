@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Export YouTube cookies from your local browser and upload to mitch-cloud VPS.
 # Required for YouTube URL uploads on prod (datacenter IPs trigger bot checks).
-#
+# Cookies live only on the VPS (not in git). Re-run when uploads start failing.
+# After the first upload, deploy rsync preserves secrets/youtube_cookies.txt.
 # Usage (from your laptop, with SSH alias "vps" configured):
 #   ./deploy/setup-youtube-cookies.sh chrome
 #   ./deploy/setup-youtube-cookies.sh firefox
