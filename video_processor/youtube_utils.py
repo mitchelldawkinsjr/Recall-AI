@@ -2,6 +2,7 @@
 
 import logging
 import os
+import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -34,13 +35,19 @@ YOUTUBE_HOSTS = frozenset(
     }
 )
 
-# Try alternate clients when YouTube returns bot checks from datacenter IPs.
-PLAYER_CLIENT_CHAINS = (
+# android skips cookie auth; web + EJS solver works with cookies on VPS.
+PLAYER_CLIENT_CHAINS_WITH_COOKIES = (
+    ["web"],
+    ["mweb", "web"],
+)
+PLAYER_CLIENT_CHAINS_WITHOUT_COOKIES = (
     ["android", "web"],
     ["tv_embedded", "web"],
     ["ios", "web"],
     ["mweb", "web"],
 )
+
+WRITABLE_COOKIES_PATH = Path("/tmp/youtube_cookies_active.txt")
 
 
 def resolve_cookies_path():
@@ -91,9 +98,23 @@ def _deno_runtime_path():
     return os.environ.get("YTDLP_DENO_PATH", "/usr/local/bin/deno")
 
 
+def _cookiefile_for_ytdlp(source: Path) -> str:
+    """yt-dlp writes cookie updates back; copy read-only secrets to /tmp."""
+    if os.access(source, os.W_OK):
+        return str(source)
+    shutil.copy2(source, WRITABLE_COOKIES_PATH)
+    return str(WRITABLE_COOKIES_PATH)
+
+
 def build_ytdlp_opts(*, player_clients=None, **overrides):
     """Shared yt-dlp options for prod VPS downloads (bot checks, retries, cookies)."""
-    clients = player_clients or PLAYER_CLIENT_CHAINS[0]
+    has_cookies = youtube_cookies_configured()
+    default_clients = (
+        PLAYER_CLIENT_CHAINS_WITH_COOKIES[0]
+        if has_cookies
+        else PLAYER_CLIENT_CHAINS_WITHOUT_COOKIES[0]
+    )
+    clients = player_clients or default_clients
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -102,15 +123,16 @@ def build_ytdlp_opts(*, player_clients=None, **overrides):
         "fragment_retries": 5,
         "http_headers": {"User-Agent": DEFAULT_YT_USER_AGENT},
         "extractor_args": {"youtube": {"player_client": clients}},
+        "remote_components": {"ejs:github"},
     }
 
     deno_path = _deno_runtime_path()
     if Path(deno_path).is_file():
-        opts["js_runtimes"] = {"deno": deno_path}
+        opts["js_runtimes"] = {"deno": {"path": deno_path}}
 
     cookie_path = resolve_cookies_path()
     if cookie_path:
-        opts["cookiefile"] = str(cookie_path)
+        opts["cookiefile"] = _cookiefile_for_ytdlp(cookie_path)
         logger.info("Using YouTube cookies from %s", cookie_path)
     elif os.environ.get("YOUTUBE_COOKIES_FILE", "").strip():
         logger.warning(
@@ -194,7 +216,12 @@ def pick_downloaded_video_file(output_dir, video_id):
 
 
 def _download_with_opts(url, output_path, ydl_opts):
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    probe_opts = dict(ydl_opts)
+    probe_opts.pop("format", None)
+    probe_opts.pop("outtmpl", None)
+    probe_opts["ignore_no_formats_error"] = True
+
+    with yt_dlp.YoutubeDL(probe_opts) as ydl:
         info = ydl.extract_info(url, download=False)
         if not info:
             raise yt_dlp.utils.DownloadError("Could not extract video information")
@@ -205,9 +232,11 @@ def _download_with_opts(url, output_path, ydl_opts):
                 f"Video too long: {duration // 60:.1f} minutes (max 60 minutes)"
             )
 
+        video_id = info.get("id", "unknown")
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
 
-        video_id = info.get("id", "unknown")
         video_path = pick_downloaded_video_file(output_path, video_id)
         if not video_path:
             raise yt_dlp.utils.DownloadError("Downloaded video file not found")
@@ -238,7 +267,11 @@ def download_youtube_video(url, output_path):
     }
 
     last_error = None
-    client_chains = (PLAYER_CLIENT_CHAINS[0],) if youtube_cookies_configured() else PLAYER_CLIENT_CHAINS
+    client_chains = (
+        PLAYER_CLIENT_CHAINS_WITH_COOKIES
+        if youtube_cookies_configured()
+        else PLAYER_CLIENT_CHAINS_WITHOUT_COOKIES
+    )
 
     for clients in client_chains:
         try:
