@@ -136,6 +136,14 @@ if [ "$STATIC_SUCCESS" = false ]; then
     # Continue anyway - static files might already be collected
 fi
 
+# YouTube ingestion requires browser cookies on VPS (datacenter IPs get bot-checked)
+YOUTUBE_COOKIES="${YOUTUBE_COOKIES_FILE:-/app/secrets/youtube_cookies.txt}"
+if [ ! -f "$YOUTUBE_COOKIES" ]; then
+    log "⚠️  YouTube cookies not found at $YOUTUBE_COOKIES — YouTube URL uploads will fail until configured (see deploy/setup-youtube-cookies.sh)"
+else
+    log "✅ YouTube cookies configured at $YOUTUBE_COOKIES"
+fi
+
 # Create superuser if it doesn't exist (non-blocking)
 log "👤 Checking superuser..."
 if [[ "${DJANGO_SETTINGS_MODULE:-}" == *production* ]] && [ -z "${ADMIN_PASSWORD:-}" ]; then
