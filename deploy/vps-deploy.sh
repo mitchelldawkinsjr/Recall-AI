@@ -30,6 +30,9 @@ attempt=0
 while [ "$attempt" -lt "$max_attempts" ]; do
   if curl -fsS http://localhost:8030/health/ > /dev/null 2>&1; then
     echo "Health check passed!"
+    if [ ! -f secrets/youtube_cookies.txt ]; then
+      echo "WARNING: secrets/youtube_cookies.txt missing — YouTube URL uploads will fail (run deploy/setup-youtube-cookies.sh)"
+    fi
     docker image prune -f
     docker compose -f "$COMPOSE_FILE" ps
     echo "DEPLOY_OK"

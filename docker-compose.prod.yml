@@ -28,6 +28,8 @@ services:
       GUNICORN_TIMEOUT: "300"
       HF_HOME: /app/.cache/huggingface
       XDG_CACHE_HOME: /app/.cache
+      YOUTUBE_COOKIES_FILE: ${YOUTUBE_COOKIES_FILE:-/app/secrets/youtube_cookies.txt}
+      YTDLP_DENO_PATH: /usr/local/bin/deno
     depends_on:
       postgres:
         condition: service_healthy
