@@ -10,6 +10,18 @@ cd "$DEPLOY_DIR"
 
 rm -f .video-processor*.tar.gz* video-processor*.tar.gz db.sqlite3 2>/dev/null || true
 
+COOKIES_FILE="secrets/youtube_cookies.txt"
+if [ -f "$COOKIES_FILE" ]; then
+  echo "Ensuring YouTube cookies permissions for container appuser (uid 995)..."
+  chmod 755 secrets/
+  chmod 644 "$COOKIES_FILE"
+  if [ "$(id -u)" -eq 0 ]; then
+    chown 995:995 "$COOKIES_FILE"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo chown 995:995 "$COOKIES_FILE" 2>/dev/null || true
+  fi
+fi
+
 echo "Building and starting containers..."
 docker compose -f "$COMPOSE_FILE" build
 docker compose -f "$COMPOSE_FILE" up -d --remove-orphans
