@@ -22,6 +22,8 @@ class VideoJob(models.Model):
     Replaces the JSON-based job management with proper Django ORM.
     """
 
+    AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac"}
+
     # Use UUID as primary key to match existing system
     job_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -75,6 +77,13 @@ class VideoJob(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.title or self.video_path}"
+
+    @property
+    def is_audio_file(self):
+        """Return True if this job references an audio file."""
+        if not self.video_path:
+            return False
+        return Path(self.video_path).suffix.lower() in self.AUDIO_EXTENSIONS
 
     @property
     def duration_seconds(self):

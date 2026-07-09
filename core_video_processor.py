@@ -68,6 +68,20 @@ class VideoFormat(Enum):
     WEBM = ".webm"
 
 
+class AudioFormat(Enum):
+    """Supported audio formats."""
+
+    MP3 = ".mp3"
+    WAV = ".wav"
+    M4A = ".m4a"
+    AAC = ".aac"
+
+
+def is_audio_file(file_path: str) -> bool:
+    """Return True if the file path has a supported audio extension."""
+    return Path(file_path).suffix.lower() in {fmt.value for fmt in AudioFormat}
+
+
 @dataclass
 class VideoMetadata:
     """
@@ -206,6 +220,8 @@ class VideoFileValidator:
     """
 
     SUPPORTED_FORMATS = {format.value for format in VideoFormat}
+    SUPPORTED_AUDIO_FORMATS = {format.value for format in AudioFormat}
+    SUPPORTED_MEDIA_FORMATS = SUPPORTED_FORMATS | SUPPORTED_AUDIO_FORMATS
     MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024  # 500MB default limit
 
     def __init__(self, max_file_size_bytes: int = MAX_FILE_SIZE_BYTES):
@@ -259,6 +275,49 @@ class VideoFileValidator:
         logger.debug(f"Video file validation successful: {file_path}")
         return True, None
 
+    def validate_audio_file(self, file_path: str) -> Tuple[bool, Optional[str]]:
+        """Validate an audio file for processing."""
+        audio_file_path = Path(file_path)
+
+        if not audio_file_path.exists():
+            return False, f"Audio file does not exist: {file_path}"
+
+        file_extension = audio_file_path.suffix.lower()
+        if file_extension not in self.SUPPORTED_AUDIO_FORMATS:
+            supported_formats_list = ", ".join(sorted(self.SUPPORTED_AUDIO_FORMATS))
+            return (
+                False,
+                f"Unsupported audio format '{file_extension}'. Supported: {supported_formats_list}",
+            )
+
+        file_size_bytes = audio_file_path.stat().st_size
+        if file_size_bytes > self.max_file_size_bytes:
+            file_size_mb = file_size_bytes / (1024 * 1024)
+            max_size_mb = self.max_file_size_bytes / (1024 * 1024)
+            return (
+                False,
+                f"File too large: {file_size_mb:.1f}MB (maximum: {max_size_mb:.1f}MB)",
+            )
+
+        if file_size_bytes == 0:
+            return False, "Audio file is empty"
+
+        logger.debug(f"Audio file validation successful: {file_path}")
+        return True, None
+
+    def validate_media_file(self, file_path: str) -> Tuple[bool, Optional[str]]:
+        """Validate a video or audio file for processing."""
+        file_extension = Path(file_path).suffix.lower()
+        if file_extension in self.SUPPORTED_AUDIO_FORMATS:
+            return self.validate_audio_file(file_path)
+        if file_extension in self.SUPPORTED_FORMATS:
+            return self.validate_video_file(file_path)
+
+        supported_formats_list = ", ".join(sorted(self.SUPPORTED_MEDIA_FORMATS))
+        return (
+            False,
+            f"Unsupported media format '{file_extension}'. Supported: {supported_formats_list}",
+        )
 
 class VideoMetadataExtractor:
     """
@@ -427,6 +486,65 @@ class VideoMetadataExtractor:
         except Exception as ffmpeg_error:
             logger.warning(f"FFmpeg metadata extraction failed: {ffmpeg_error}")
             return {}
+
+    def extract_audio_metadata(self, file_path: str) -> Optional[VideoMetadata]:
+        """Extract metadata from an audio-only file using ffprobe."""
+        try:
+            audio_path = Path(file_path)
+            file_stats = audio_path.stat()
+            basic_metadata = {
+                "file_path": str(audio_path.absolute()),
+                "format_extension": audio_path.suffix.lower().lstrip("."),
+                "file_size_bytes": file_stats.st_size,
+                "creation_timestamp": datetime.now(),
+                "duration_seconds": 0.0,
+                "width_pixels": 0,
+                "height_pixels": 0,
+                "frames_per_second": 0.0,
+            }
+
+            if self.ffmpeg_available:
+                ffprobe_data = self._run_ffprobe(file_path)
+                if ffprobe_data:
+                    duration_seconds = float(
+                        ffprobe_data.get("format", {}).get("duration", 0)
+                    )
+                    basic_metadata["duration_seconds"] = duration_seconds
+
+                    for stream in ffprobe_data.get("streams", []):
+                        if stream.get("codec_type") == "audio":
+                            if not basic_metadata["duration_seconds"]:
+                                basic_metadata["duration_seconds"] = float(
+                                    stream.get("duration", 0)
+                                )
+                            break
+
+            return VideoMetadata(**basic_metadata)
+
+        except Exception as extraction_error:
+            logger.error(f"Failed to extract audio metadata: {extraction_error}")
+            return None
+
+    def _run_ffprobe(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """Run ffprobe and return parsed JSON output."""
+        try:
+            ffprobe_command = [
+                "ffprobe",
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+                file_path,
+            ]
+            result = subprocess.run(
+                ffprobe_command, capture_output=True, text=True, check=True
+            )
+            return json.loads(result.stdout)
+        except Exception as ffprobe_error:
+            logger.warning(f"ffprobe failed: {ffprobe_error}")
+            return None
 
 
 class AudioExtractor:
@@ -738,6 +856,23 @@ class CoreVideoProcessor:
         """
         return self.video_validator.validate_video_file(video_file_path)
 
+    def validate_media_file(self, file_path: str) -> Tuple[bool, Optional[str]]:
+        """Validate a video or audio file for processing."""
+        return self.video_validator.validate_media_file(file_path)
+
+    def extract_audio_file_metadata(
+        self, audio_file_path: str
+    ) -> Optional[VideoMetadata]:
+        """Extract metadata from an audio file."""
+        is_valid, validation_error = self.video_validator.validate_audio_file(
+            audio_file_path
+        )
+        if not is_valid:
+            logger.error(f"Audio validation failed: {validation_error}")
+            return None
+
+        return self.metadata_extractor.extract_audio_metadata(audio_file_path)
+
     def extract_video_metadata(self, video_file_path: str) -> Optional[VideoMetadata]:
         """
         Extract comprehensive metadata from a video file.
@@ -853,6 +988,77 @@ class CoreVideoProcessor:
             return TranscriptionResult(
                 status=ProcessingStatus.FAILED, error_message=error_message
             )
+
+    def create_comprehensive_media_summary(
+        self, file_path: str, language_code: str = "auto"
+    ) -> Dict[str, Any]:
+        """Create a comprehensive analysis summary for video or audio files."""
+        if is_audio_file(file_path):
+            return self._create_comprehensive_audio_summary(file_path, language_code)
+        return self.create_comprehensive_video_summary(file_path, language_code)
+
+    def _create_comprehensive_audio_summary(
+        self, audio_file_path: str, language_code: str = "auto"
+    ) -> Dict[str, Any]:
+        """Create a comprehensive analysis summary of an audio file."""
+        analysis_summary = {
+            "video_file_path": audio_file_path,
+            "analysis_timestamp": datetime.now().isoformat(),
+            "metadata": None,
+            "transcription": None,
+            "processing_errors": [],
+        }
+
+        try:
+            is_valid, validation_error = self.validate_media_file(audio_file_path)
+            if not is_valid:
+                analysis_summary["processing_errors"].append(validation_error)
+                return analysis_summary
+
+            logger.info(f"Creating comprehensive audio summary for: {audio_file_path}")
+            audio_metadata = self.extract_audio_file_metadata(audio_file_path)
+            if audio_metadata:
+                analysis_summary["metadata"] = audio_metadata.to_dict()
+                logger.info(
+                    f"Audio metadata extracted: {audio_metadata.duration_seconds:.2f}s"
+                )
+
+            if self.transcription_service.whisper_available:
+                transcription_result = self.transcribe_audio_file(
+                    audio_file_path, language_code
+                )
+
+                if transcription_result.is_successful:
+                    analysis_summary["transcription"] = {
+                        "text": transcription_result.transcribed_text,
+                        "text_segments": transcription_result.text_segments,
+                        "language": transcription_result.detected_language,
+                        "confidence_score": transcription_result.confidence_score,
+                        "word_count": transcription_result.word_count,
+                        "processing_duration_seconds": transcription_result.processing_duration_seconds,
+                    }
+                    logger.info(
+                        f"Transcription completed: {transcription_result.word_count} words in {transcription_result.detected_language}"
+                    )
+                else:
+                    analysis_summary["processing_errors"].append(
+                        f"Transcription failed: {transcription_result.error_message}"
+                    )
+            else:
+                analysis_summary["processing_errors"].append(
+                    "Transcription service not available"
+                )
+
+            logger.info(
+                f"Audio analysis completed with {len(analysis_summary['processing_errors'])} errors"
+            )
+
+        except Exception as analysis_error:
+            error_message = f"Audio analysis failed: {analysis_error}"
+            logger.error(error_message)
+            analysis_summary["processing_errors"].append(error_message)
+
+        return analysis_summary
 
     def create_comprehensive_video_summary(
         self, video_file_path: str, language_code: str = "auto"
