@@ -21,16 +21,19 @@ def clean_video_name(video_name: str | None) -> str:
     return cleaned_name.strip() or "Video"
 
 
-def perform_keyword_search(query: str) -> list[dict[str, Any]]:
+def perform_keyword_search(query: str, user=None) -> list[dict[str, Any]]:
     search_results = []
-    videos = VideoJob.objects.filter(
-        status=JobStatus.COMPLETED, transcription__isnull=False
-    )
+    filters: dict[str, Any] = {
+        "status": JobStatus.COMPLETED,
+        "transcription__isnull": False,
+    }
+    if user is not None:
+        filters["user"] = user
+    videos = VideoJob.objects.filter(**filters)
     for video in videos:
-        if query.lower() in video.transcription_text.lower():
-            matching_segments = video.search_segments(query)
-            if matching_segments:
-                search_results.append({"video": video, "segments": matching_segments})
+        matching_segments = video.search_segments(query)
+        if matching_segments:
+            search_results.append({"video": video, "segments": matching_segments})
     return search_results
 
 
@@ -50,7 +53,7 @@ def flatten_keyword_results(
                     "start_time": seg["start_time"],
                     "end_time": seg["end_time"],
                     "text": seg["text"],
-                    "score": 1.0,
+                    "score": seg.get("relevance_score", 1.0),
                 }
             )
     return flat
@@ -87,7 +90,7 @@ def convert_semantic_results_to_api_format(semantic_results):
             "end_time": result.end_time,
             "text": result.text,
             "relevance_score": result.score,
-            "search_type": "semantic",
+            "search_type": result.search_type,
             "timestamp_formatted": f"{int(result.start_time // 60)}:{int(result.start_time % 60):02d}",
         }
         for result in semantic_results
@@ -181,16 +184,50 @@ def get_video_segments_for_search():
     return video_segments_data
 
 
+def ensure_search_engine_initialized(search_engine) -> bool:
+    if not search_engine:
+        return False
+    if search_engine.is_initialized:
+        return True
+    if hasattr(search_engine, "_load_index"):
+        search_engine._load_index()
+    return search_engine.is_initialized
+
+
+def rebuild_semantic_search_index(search_engine) -> int:
+    segments = get_video_segments_for_search()
+    if hasattr(search_engine, "rebuild_index"):
+        return search_engine.rebuild_index(segments)
+    search_engine.build_index(segments)
+    return len(search_engine.segments_metadata)
+
+
 def run_legacy_api_search(query, search_mode, search_engine, k=50):
     """api/search — keyword, semantic, or search_engine hybrid."""
     try:
-        if search_mode == "semantic" and search_engine and search_engine.is_initialized:
-            results = search_engine.semantic_search(query, top_k=k)
-            return convert_semantic_results_to_api_format(results), "semantic"
-        if search_mode == "hybrid" and search_engine and search_engine.is_initialized:
+        engine_ready = ensure_search_engine_initialized(search_engine)
+
+        if search_mode == "keyword":
+            return (
+                convert_keyword_results_to_api_format(perform_keyword_search(query)),
+                "keyword",
+            )
+
+        if search_mode == "semantic":
+            if engine_ready:
+                results = search_engine.semantic_search(query, top_k=k)
+                if results:
+                    return convert_semantic_results_to_api_format(results), "semantic"
+            return (
+                convert_keyword_results_to_api_format(perform_keyword_search(query)),
+                "keyword_fallback",
+            )
+
+        if search_mode == "hybrid" and engine_ready:
             segments_data = get_video_segments_for_search()
             results = search_engine.hybrid_search(query, segments_data, top_k=k)
             return convert_semantic_results_to_api_format(results), "hybrid"
+
         return (
             convert_keyword_results_to_api_format(perform_keyword_search(query)),
             "keyword",
@@ -227,9 +264,10 @@ def run_enhanced_api_search(
                 return convert_enhanced_results_to_api_format(enhanced_results), mode
             except Exception as exc:
                 logger.warning("Enhanced search failed, falling back: %s", exc)
-        if search_engine and search_engine.is_initialized:
+        if search_engine and ensure_search_engine_initialized(search_engine):
             results = search_engine.semantic_search(query, top_k=k)
-            return convert_semantic_results_to_api_format(results), "semantic"
+            if results:
+                return convert_semantic_results_to_api_format(results), "semantic"
         return (
             convert_keyword_results_to_api_format(perform_keyword_search(query)),
             "keyword",
@@ -267,9 +305,18 @@ def run_advanced_api_search(
                 "enhanced_advanced",
             )
 
-        if search_type == "semantic" and search_engine and search_engine.is_initialized:
+        if (
+            search_type == "semantic"
+            and search_engine
+            and ensure_search_engine_initialized(search_engine)
+        ):
             results = search_engine.semantic_search(query, top_k=k)
-            return convert_semantic_results_to_api_format(results), "semantic"
+            if results:
+                return convert_semantic_results_to_api_format(results), "semantic"
+            return (
+                convert_keyword_results_to_api_format(perform_keyword_search(query)),
+                "keyword_fallback",
+            )
 
         if search_type == "keyword":
             return (
@@ -293,7 +340,7 @@ def run_advanced_api_search(
                     )
                 except Exception as exc:
                     logger.warning("Enhanced search in hybrid failed: %s", exc)
-            if search_engine and search_engine.is_initialized:
+            if search_engine and ensure_search_engine_initialized(search_engine):
                 try:
                     semantic_results = search_engine.semantic_search(
                         query, top_k=k // 2
@@ -323,9 +370,10 @@ def run_advanced_api_search(
                 convert_enhanced_results_to_api_format(enhanced_results),
                 "enhanced_fallback",
             )
-        if search_engine and search_engine.is_initialized:
+        if search_engine and ensure_search_engine_initialized(search_engine):
             results = search_engine.semantic_search(query, top_k=k)
-            return convert_semantic_results_to_api_format(results), "semantic_fallback"
+            if results:
+                return convert_semantic_results_to_api_format(results), "semantic_fallback"
         return (
             convert_keyword_results_to_api_format(perform_keyword_search(query)),
             "keyword_fallback",

@@ -146,24 +146,32 @@ class SemanticSearchEngine:
             if not segments:
                 continue
 
-            # Generate embeddings for this video's segments
-            embeddings = self.encode_segments(segments)
+            indexed_segments = [
+                (i, segment)
+                for i, segment in enumerate(segments)
+                if segment.get("text", "").strip()
+            ]
+            if not indexed_segments:
+                continue
+
+            texts = [segment.get("text", "").strip() for _, segment in indexed_segments]
+            embeddings = self.model.encode(
+                texts, convert_to_numpy=True, show_progress_bar=False
+            )
             if embeddings.size == 0:
                 continue
 
-            # Store metadata for each segment
-            for i, segment in enumerate(segments):
-                if i < len(embeddings):  # Ensure we have embedding for this segment
-                    self.segments_metadata.append(
-                        {
-                            "job_id": video_data["job_id"],
-                            "video_name": video_data["video_name"],
-                            "segment_index": i,
-                            "start_time": segment.get("start", 0),
-                            "end_time": segment.get("end", 0),
-                            "text": segment.get("text", "").strip(),
-                        }
-                    )
+            for (segment_index, segment), _embedding in zip(indexed_segments, embeddings):
+                self.segments_metadata.append(
+                    {
+                        "job_id": video_data["job_id"],
+                        "video_name": video_data["video_name"],
+                        "segment_index": segment_index,
+                        "start_time": segment.get("start", 0),
+                        "end_time": segment.get("end", 0),
+                        "text": segment.get("text", "").strip(),
+                    }
+                )
 
             all_embeddings.append(embeddings)
 
@@ -189,6 +197,11 @@ class SemanticSearchEngine:
 
         # Save index and metadata
         self._save_index()
+
+    def rebuild_index(self, video_segments: List[Dict]) -> int:
+        """Rebuild the FAISS index from video segment data."""
+        self.build_index(video_segments)
+        return len(self.segments_metadata)
 
     def _save_index(self):
         """Save FAISS index and metadata to disk."""
@@ -294,6 +307,47 @@ class SemanticSearchEngine:
             logger.error(f"Semantic search error: {e}")
             return []
 
+    @staticmethod
+    def score_segment_text(query: str, text: str) -> float:
+        """Score how well a segment matches a keyword query."""
+        query_lower = query.lower().strip()
+        text_lower = text.lower().strip()
+        if not query_lower or not text_lower:
+            return 0.0
+
+        if query_lower in text_lower:
+            count = text_lower.count(query_lower)
+            position_score = 1.0 if text_lower.startswith(query_lower) else 0.5
+            return count * position_score * 2.0
+
+        tokens = [token for token in query_lower.split() if token]
+        if not tokens:
+            return 0.0
+        if all(token in text_lower for token in tokens):
+            return float(sum(text_lower.count(token) for token in tokens))
+        if len(tokens) > 1 and any(token in text_lower for token in tokens):
+            return float(
+                sum(text_lower.count(token) for token in tokens if token in text_lower)
+            )
+        return 0.0
+
+    @staticmethod
+    def keyword_search_matches_query(query: str, segments: List[Dict]) -> bool:
+        query_lower = query.lower().strip()
+        tokens = [token for token in query_lower.split() if token]
+        if not tokens:
+            return False
+
+        full_text = " ".join(
+            segment.get("text", "").strip().lower() for segment in segments
+        )
+        if all(token in full_text for token in tokens):
+            return True
+        return any(
+            SemanticSearchEngine.score_segment_text(query, segment.get("text", "")) > 0
+            for segment in segments
+        )
+
     def keyword_search(
         self, query: str, segments_data: List[Dict]
     ) -> List[SearchResult]:
@@ -308,31 +362,30 @@ class SemanticSearchEngine:
             List of SearchResult objects
         """
         results = []
-        query_lower = query.lower()
 
         for video_data in segments_data:
             segments = video_data.get("segments", [])
+            if not self.keyword_search_matches_query(query, segments):
+                continue
 
             for i, segment in enumerate(segments):
-                text = segment.get("text", "").lower()
-                if query_lower in text:
-                    # Simple relevance scoring based on query frequency and position
-                    count = text.count(query_lower)
-                    position_score = 1.0 if text.startswith(query_lower) else 0.5
-                    score = count * position_score
+                text = segment.get("text", "").strip()
+                score = self.score_segment_text(query, text)
+                if score <= 0:
+                    continue
 
-                    results.append(
-                        SearchResult(
-                            job_id=video_data["job_id"],
-                            video_name=video_data["video_name"],
-                            segment_index=i,
-                            start_time=segment.get("start", 0),
-                            end_time=segment.get("end", 0),
-                            text=segment.get("text", ""),
-                            score=score,
-                            search_type="keyword",
-                        )
+                results.append(
+                    SearchResult(
+                        job_id=video_data["job_id"],
+                        video_name=video_data["video_name"],
+                        segment_index=i,
+                        start_time=segment.get("start", 0),
+                        end_time=segment.get("end", 0),
+                        text=text,
+                        score=score,
+                        search_type="keyword",
                     )
+                )
 
         # Sort by score (descending)
         results.sort(key=lambda x: x.score, reverse=True)

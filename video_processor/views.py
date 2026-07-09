@@ -48,9 +48,11 @@ from .search_helpers import (
     convert_keyword_results_to_api_format,
     convert_semantic_results_to_api_format,
     convert_semantic_results_to_display_format,
+    ensure_search_engine_initialized,
     filter_api_results_by_user,
     get_video_segments_for_search,
     perform_keyword_search,
+    rebuild_semantic_search_index,
     resolve_target_user,
     run_advanced_api_search,
     run_enhanced_api_search,
@@ -106,12 +108,17 @@ def get_media_content_type(file_path: str) -> str:
     guessed_type, _ = mimetypes.guess_type(file_path)
     return guessed_type or "video/mp4"
 
-# Check if search engine is available
+# Check if search engine is available (may be stale until index is loaded/rebuilt)
 search_available = (
     search_engine is not None
     and hasattr(search_engine, "is_initialized")
     and search_engine.is_initialized
 )
+
+
+def is_search_engine_available() -> bool:
+    """Return whether the semantic search index is ready for queries."""
+    return bool(search_engine and ensure_search_engine_initialized(search_engine))
 
 
 def create_error_response(error_code, message, details=None, status_code=400):
@@ -294,17 +301,24 @@ def search_videos(request):
 
     # Perform search based on selected mode
     search_results = []
+    search_user = request.user if request.user.is_authenticated else None
+    engine_ready = is_search_engine_available()
 
     try:
-        if search_mode == "semantic" and search_engine.is_initialized:
-            # Pure semantic search
-            semantic_results = search_engine.semantic_search(query, top_k=50)
-            search_results = convert_semantic_results_to_display_format(
-                semantic_results
-            )
+        if search_mode == "keyword":
+            search_results = perform_keyword_search(query, user=search_user)
 
-        elif search_mode == "hybrid" and search_engine.is_initialized:
-            # Hybrid search (combines semantic + keyword)
+        elif search_mode == "semantic" and engine_ready:
+            semantic_results = search_engine.semantic_search(query, top_k=50)
+            if semantic_results:
+                search_results = convert_semantic_results_to_display_format(
+                    semantic_results
+                )
+            else:
+                search_results = perform_keyword_search(query, user=search_user)
+                search_mode = "keyword_fallback"
+
+        elif search_mode == "hybrid" and engine_ready:
             video_segments_data = get_video_segments_for_search()
             hybrid_results = search_engine.hybrid_search(
                 query, video_segments_data, top_k=50
@@ -312,13 +326,14 @@ def search_videos(request):
             search_results = convert_semantic_results_to_display_format(hybrid_results)
 
         else:
-            # Fallback to keyword search
-            search_results = perform_keyword_search(query)
+            search_results = perform_keyword_search(query, user=search_user)
+            if search_mode in {"semantic", "hybrid"}:
+                search_mode = "keyword_fallback"
 
     except Exception as e:
         logger.error(f"Search error: {e}")
-        # Fallback to keyword search on any error
-        search_results = perform_keyword_search(query)
+        search_results = perform_keyword_search(query, user=search_user)
+        search_mode = "keyword_fallback"
 
     # Update search query results count
     VideoSearchQuery.objects.filter(query=query).update(
@@ -345,13 +360,11 @@ def search_videos(request):
     }
 
     # Check search engine status for template
-    search_available = False
+    search_available = is_search_engine_available()
     try:
-        stats_search = search_engine.get_stats()
-        if stats_search["is_available"] and not stats_search["is_initialized"]:
+        if search_engine and not search_available:
             search_engine._load_index()
-            stats_search = search_engine.get_stats()
-        search_available = stats_search["is_initialized"]
+            search_available = is_search_engine_available()
     except Exception as e:
         logger.warning(f"Could not check search engine status: {e}")
 
@@ -734,28 +747,20 @@ def delete_video(request, job_id):
 def api_search_status(request):
     """API endpoint to get search engine status."""
     try:
-        # Check if search engine is available and initialized
+        engine_ready = is_search_engine_available()
         status = {
-            "available": search_available,
-            "initialized": False,
+            "available": search_engine is not None,
+            "initialized": engine_ready,
             "model_name": "all-MiniLM-L6-v2",
             "indexed_segments": 0,
         }
 
-        if search_available and search_engine:
+        if search_engine:
             try:
-                # Try to get index stats
-                if hasattr(search_engine, "index") and search_engine.index is not None:
-                    status["initialized"] = True
-                    status["indexed_segments"] = (
-                        search_engine.index.ntotal
-                        if hasattr(search_engine.index, "ntotal")
-                        else 0
-                    )
-                elif hasattr(search_engine, "get_stats"):
-                    stats = search_engine.get_stats()
-                    status["initialized"] = stats.get("initialized", False)
-                    status["indexed_segments"] = stats.get("segments", 0)
+                stats = search_engine.get_stats()
+                status["initialized"] = stats.get("is_initialized", engine_ready)
+                status["indexed_segments"] = stats.get("total_segments", 0)
+                status["model_name"] = stats.get("model_name", status["model_name"])
             except Exception as e:
                 logger.error(f"Error getting search engine stats: {e}")
 
@@ -767,12 +772,9 @@ def api_search_status(request):
 
 def rebuild_search_index():
     """Rebuild semantic search index (CLI helper)."""
-    if search_engine and hasattr(search_engine, "rebuild_index"):
-        return search_engine.rebuild_index()
-    segments = get_video_segments_for_search()
-    if search_engine and hasattr(search_engine, "add_segments"):
-        search_engine.add_segments(segments)
-    return len(segments)
+    if not search_engine:
+        return 0
+    return rebuild_semantic_search_index(search_engine)
 
 
 @login_required
@@ -780,12 +782,11 @@ def rebuild_search_index():
 def api_rebuild_search_index(request):
     """API endpoint to rebuild the search index."""
     try:
-        if not search_available:
+        if not search_engine:
             return JsonResponse(
                 {"success": False, "error": "Search engine not available"}
             )
 
-        # Get all completed videos
         completed_videos = VideoJob.objects.filter(status=JobStatus.COMPLETED)
 
         if not completed_videos.exists():
@@ -793,31 +794,23 @@ def api_rebuild_search_index(request):
                 {"success": False, "error": "No completed videos to index"}
             )
 
-        # Rebuild index
-        segments_indexed = 0
-
         try:
-            # If we have the semantic search engine, rebuild its index
-            if search_engine and hasattr(search_engine, "rebuild_index"):
-                segments_indexed = search_engine.rebuild_index()
-            else:
-                # Basic rebuild approach
-                segments = get_video_segments_for_search()
-                segments_indexed = len(segments)
-
-                if search_engine and hasattr(search_engine, "add_segments"):
-                    search_engine.add_segments(segments)
-
+            segments_indexed = rebuild_semantic_search_index(search_engine)
         except Exception as e:
             logger.error(f"Error rebuilding search index: {e}")
             return JsonResponse(
                 {"success": False, "error": f"Failed to rebuild index: {str(e)}"}
             )
 
+        global search_available
+        search_available = is_search_engine_available()
+
         return JsonResponse(
             {
                 "success": True,
                 "message": f"Search index rebuilt successfully with {segments_indexed} segments",
+                "segments_indexed": segments_indexed,
+                "initialized": search_available,
             }
         )
 
@@ -839,12 +832,17 @@ def api_rebuild_enhanced_search_index(request):
         # Get video segments from the regular search engine
         from semantic_search import search_engine
 
-        if not search_engine.is_initialized:
-            return JsonResponse(
-                {"success": False, "error": "Regular search engine not initialized"}
-            )
+        if not is_search_engine_available():
+            try:
+                rebuild_semantic_search_index(search_engine)
+            except Exception as e:
+                return JsonResponse(
+                    {
+                        "success": False,
+                        "error": f"Failed to build base search index: {str(e)}",
+                    }
+                )
 
-        # Use the same segments data that the regular search engine uses
         video_segments_data = []
 
         for segment in search_engine.segments_metadata:
@@ -1281,6 +1279,19 @@ def process_video_job(job_id):
                 logger.info(f"   🗣️ Language: {job.language}")
 
             job.save()
+
+            if job.status == JobStatus.COMPLETED and search_engine:
+                try:
+                    segments_indexed = rebuild_semantic_search_index(search_engine)
+                    global search_available
+                    search_available = is_search_engine_available()
+                    logger.info(
+                        f"Search index rebuilt with {segments_indexed} segments"
+                    )
+                except Exception as index_error:
+                    logger.warning(
+                        f"Failed to rebuild search index after processing: {index_error}"
+                    )
 
         except Exception as e:
             logger.error(f"❌ Error processing job {job_id}: {e}")
