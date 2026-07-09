@@ -220,25 +220,63 @@ class VideoJob(models.Model):
             query: Search term
 
         Returns:
-            List of matching segments with timestamps
+            List of matching segments with timestamps and relevance scores
         """
         if not self.text_segments or not query:
             return []
 
         matching_segments = []
-        query_lower = query.lower()
+        query_lower = query.lower().strip()
+        tokens = [token for token in query_lower.split() if token]
 
         for segment in self.text_segments:
-            text = segment.get("text", "").lower()
-            if query_lower in text:
-                matching_segments.append(
-                    {
-                        "start_time": segment.get("start", 0),
-                        "end_time": segment.get("end", 0),
-                        "text": segment.get("text", "").strip(),
-                    }
-                )
+            text = segment.get("text", "").strip()
+            text_lower = text.lower()
+            if not text_lower:
+                continue
 
+            if query_lower in text_lower:
+                count = text_lower.count(query_lower)
+                position_score = 1.0 if text_lower.startswith(query_lower) else 0.5
+                score = count * position_score * 2.0
+            elif tokens and all(token in text_lower for token in tokens):
+                score = float(sum(text_lower.count(token) for token in tokens))
+            else:
+                continue
+
+            matching_segments.append(
+                {
+                    "start_time": segment.get("start", 0),
+                    "end_time": segment.get("end", 0),
+                    "text": text,
+                    "relevance_score": score,
+                }
+            )
+
+        if not matching_segments and len(tokens) > 1:
+            full_text = self.transcription_text.lower()
+            if all(token in full_text for token in tokens):
+                for segment in self.text_segments:
+                    text = segment.get("text", "").strip()
+                    text_lower = text.lower()
+                    if not text_lower:
+                        continue
+                    hit_tokens = [token for token in tokens if token in text_lower]
+                    if not hit_tokens:
+                        continue
+                    score = float(
+                        sum(text_lower.count(token) for token in hit_tokens)
+                    )
+                    matching_segments.append(
+                        {
+                            "start_time": segment.get("start", 0),
+                            "end_time": segment.get("end", 0),
+                            "text": text,
+                            "relevance_score": score,
+                        }
+                    )
+
+        matching_segments.sort(key=lambda item: item["relevance_score"], reverse=True)
         return matching_segments
 
 

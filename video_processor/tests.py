@@ -202,3 +202,43 @@ class HomeViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Search Hub")
         self.assertNotContains(response, "Built for real-world applications")
+
+
+class SearchFunctionalityTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="searchuser", password="testpass123"
+        )
+        self.video = VideoJob.objects.create(
+            user=self.user,
+            video_path="/test/video.mp4",
+            video_name="Budget Planning.mp4",
+            status="completed",
+            transcription={
+                "text": "We discussed the annual budget and planning goals.",
+                "text_segments": [
+                    {"start": 0.0, "end": 2.0, "text": "We discussed the annual"},
+                    {"start": 2.0, "end": 4.0, "text": "budget and planning goals."},
+                ],
+            },
+        )
+
+    def test_keyword_search_matches_cross_segment_queries(self):
+        from .search_helpers import perform_keyword_search
+
+        results = perform_keyword_search("annual budget")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(results[0]["segments"]), 2)
+
+    def test_legacy_semantic_mode_reports_keyword_fallback(self):
+        from unittest.mock import MagicMock, patch
+
+        from .search_helpers import run_legacy_api_search
+
+        mock_engine = MagicMock()
+        with patch(
+            "video_processor.search_helpers.ensure_search_engine_initialized",
+            return_value=False,
+        ):
+            _, mode = run_legacy_api_search("budget", "semantic", mock_engine)
+        self.assertEqual(mode, "keyword_fallback")
