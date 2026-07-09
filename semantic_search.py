@@ -161,7 +161,9 @@ class SemanticSearchEngine:
             if embeddings.size == 0:
                 continue
 
-            for (segment_index, segment), _embedding in zip(indexed_segments, embeddings):
+            for (segment_index, segment), _embedding in zip(
+                indexed_segments, embeddings
+            ):
                 self.segments_metadata.append(
                     {
                         "job_id": video_data["job_id"],

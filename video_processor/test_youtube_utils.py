@@ -67,7 +67,9 @@ class BuildYtdlpOptsTests(SimpleTestCase):
 
     def test_uses_custom_player_clients(self):
         opts = build_ytdlp_opts(player_clients=["ios", "web"])
-        self.assertEqual(opts["extractor_args"]["youtube"]["player_client"], ["ios", "web"])
+        self.assertEqual(
+            opts["extractor_args"]["youtube"]["player_client"], ["ios", "web"]
+        )
 
 
 class CookieConfigTests(SimpleTestCase):
@@ -75,13 +77,22 @@ class CookieConfigTests(SimpleTestCase):
         with TemporaryDirectory() as tmpdir:
             cookies = Path(tmpdir) / "cookies.txt"
             cookies.write_text("# Netscape HTTP Cookie File\n")
-            with patch.dict("os.environ", {"YOUTUBE_COOKIES_FILE": str(cookies)}, clear=False):
+            with patch.dict(
+                "os.environ", {"YOUTUBE_COOKIES_FILE": str(cookies)}, clear=False
+            ):
                 self.assertEqual(resolve_cookies_path(), cookies)
                 self.assertTrue(youtube_cookies_configured())
 
     def test_resolve_cookies_path_missing(self):
-        with patch.dict("os.environ", {"YOUTUBE_COOKIES_FILE": "/nonexistent/cookies.txt"}, clear=False):
-            with patch("video_processor.youtube_utils.DEFAULT_COOKIES_PATH", Path("/also/missing.txt")):
+        with patch.dict(
+            "os.environ",
+            {"YOUTUBE_COOKIES_FILE": "/nonexistent/cookies.txt"},
+            clear=False,
+        ):
+            with patch(
+                "video_processor.youtube_utils.DEFAULT_COOKIES_PATH",
+                Path("/also/missing.txt"),
+            ):
                 self.assertIsNone(resolve_cookies_path())
                 self.assertFalse(youtube_cookies_configured())
 
@@ -91,8 +102,13 @@ class BotCheckErrorTests(SimpleTestCase):
         self.assertTrue(is_bot_check_error("Sign in to confirm you're not a bot"))
 
     def test_format_download_error_without_cookies(self):
-        with patch("video_processor.youtube_utils.youtube_cookies_configured", return_value=False):
-            message = format_download_error(Exception("Sign in to confirm you're not a bot"))
+        with patch(
+            "video_processor.youtube_utils.youtube_cookies_configured",
+            return_value=False,
+        ):
+            message = format_download_error(
+                Exception("Sign in to confirm you're not a bot")
+            )
         self.assertIn("setup-youtube-cookies.sh", message)
 
 
@@ -126,7 +142,9 @@ class DownloadYouTubeVideoTests(SimpleTestCase):
         self.assertIn("Invalid", error)
 
     @patch("video_processor.youtube_utils._download_with_opts")
-    @patch("video_processor.youtube_utils.youtube_cookies_configured", return_value=False)
+    @patch(
+        "video_processor.youtube_utils.youtube_cookies_configured", return_value=False
+    )
     def test_retries_next_client_on_bot_check(self, _configured, mock_download):
         mock_download.side_effect = [
             yt_dlp.utils.DownloadError("Sign in to confirm you're not a bot"),

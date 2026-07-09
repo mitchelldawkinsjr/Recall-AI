@@ -373,7 +373,10 @@ def run_advanced_api_search(
         if search_engine and ensure_search_engine_initialized(search_engine):
             results = search_engine.semantic_search(query, top_k=k)
             if results:
-                return convert_semantic_results_to_api_format(results), "semantic_fallback"
+                return (
+                    convert_semantic_results_to_api_format(results),
+                    "semantic_fallback",
+                )
         return (
             convert_keyword_results_to_api_format(perform_keyword_search(query)),
             "keyword_fallback",
