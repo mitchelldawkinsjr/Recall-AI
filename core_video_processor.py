@@ -319,6 +319,7 @@ class VideoFileValidator:
             f"Unsupported media format '{file_extension}'. Supported: {supported_formats_list}",
         )
 
+
 class VideoMetadataExtractor:
     """
     Responsible for extracting metadata from video files.

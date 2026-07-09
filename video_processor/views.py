@@ -108,6 +108,7 @@ def get_media_content_type(file_path: str) -> str:
     guessed_type, _ = mimetypes.guess_type(file_path)
     return guessed_type or "video/mp4"
 
+
 # Check if search engine is available (may be stale until index is loaded/rebuilt)
 search_available = (
     search_engine is not None
@@ -1044,9 +1045,9 @@ def api_video_details(request, job_id):
             "video_name": video.video_name,
             "status": video.status,
             "media_type": "audio" if video.is_audio_file else "video",
-            "content_type": get_media_content_type(video.video_path)
-            if video.video_path
-            else None,
+            "content_type": (
+                get_media_content_type(video.video_path) if video.video_path else None
+            ),
             "is_youtube": hasattr(video, "youtube_url") and bool(video.youtube_url),
             "youtube_video_id": None,
             "duration_seconds": video.duration_seconds,

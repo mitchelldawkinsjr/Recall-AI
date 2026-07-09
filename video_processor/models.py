@@ -264,9 +264,7 @@ class VideoJob(models.Model):
                     hit_tokens = [token for token in tokens if token in text_lower]
                     if not hit_tokens:
                         continue
-                    score = float(
-                        sum(text_lower.count(token) for token in hit_tokens)
-                    )
+                    score = float(sum(text_lower.count(token) for token in hit_tokens))
                     matching_segments.append(
                         {
                             "start_time": segment.get("start", 0),
