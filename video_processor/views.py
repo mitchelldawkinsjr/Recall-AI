@@ -31,7 +31,7 @@ from django.views.generic import ListView
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
 
-from core_video_processor import CoreVideoProcessor
+from core_video_processor import CoreVideoProcessor, VideoFileValidator
 
 from .models import JobStatus, VideoJob, VideoSearchQuery
 from .youtube_utils import (
@@ -87,6 +87,24 @@ except ImportError as e:
 
 # Initialize the video processor
 video_processor = CoreVideoProcessor()
+
+ALLOWED_UPLOAD_EXTENSIONS = VideoFileValidator.SUPPORTED_MEDIA_FORMATS
+
+AUDIO_CONTENT_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+}
+
+
+def get_media_content_type(file_path: str) -> str:
+    """Return the HTTP content type for a media file path."""
+    extension = Path(file_path).suffix.lower()
+    if extension in AUDIO_CONTENT_TYPES:
+        return AUDIO_CONTENT_TYPES[extension]
+    guessed_type, _ = mimetypes.guess_type(file_path)
+    return guessed_type or "video/mp4"
 
 # Check if search engine is available
 search_available = (
@@ -386,12 +404,21 @@ def upload_video(request):
 
     # Handle file upload (existing code)
     if "video" not in request.FILES:
-        messages.error(request, "No video file provided")
+        messages.error(request, "No media file provided")
         return redirect("video_library")
 
     video_file = request.FILES["video"]
     if not video_file.name:
-        messages.error(request, "Invalid video file")
+        messages.error(request, "Invalid media file")
+        return redirect("video_library")
+
+    file_extension = Path(video_file.name).suffix.lower()
+    if file_extension not in ALLOWED_UPLOAD_EXTENSIONS:
+        supported = ", ".join(sorted(ALLOWED_UPLOAD_EXTENSIONS))
+        messages.error(
+            request,
+            f"Unsupported file type '{file_extension}'. Supported formats: {supported}",
+        )
         return redirect("video_library")
 
     try:
@@ -425,12 +452,12 @@ def upload_video(request):
         start_video_job_thread(job.job_id)
 
         messages.success(
-            request, f'Video "{video_file.name}" uploaded and queued for processing'
+            request, f'"{video_file.name}" uploaded and queued for processing'
         )
 
     except Exception as e:
-        logger.error(f"Error uploading video: {e}")
-        messages.error(request, f"Error uploading video: {e}")
+        logger.error(f"Error uploading media file: {e}")
+        messages.error(request, f"Error uploading file: {e}")
 
     return redirect("video_library")
 
@@ -1018,6 +1045,10 @@ def api_video_details(request, job_id):
             "job_id": str(video.job_id),
             "video_name": video.video_name,
             "status": video.status,
+            "media_type": "audio" if video.is_audio_file else "video",
+            "content_type": get_media_content_type(video.video_path)
+            if video.video_path
+            else None,
             "is_youtube": hasattr(video, "youtube_url") and bool(video.youtube_url),
             "youtube_video_id": None,
             "duration_seconds": video.duration_seconds,
@@ -1228,7 +1259,7 @@ def process_video_job(job_id):
             start_time = time.time()
 
             # Process video using core processor
-            result = video_processor.create_comprehensive_video_summary(job.video_path)
+            result = video_processor.create_comprehensive_media_summary(job.video_path)
 
             processing_time = time.time() - start_time
 
@@ -1535,11 +1566,13 @@ def video_file_serve(request, job_id):
                 status=404,
             )
 
-        # Serve the video file
+        # Serve the media file
         file_size = os.path.getsize(video_path)
 
-        # Set appropriate headers for video streaming
-        response = FileResponse(open(video_path, "rb"), content_type="video/mp4")
+        response = FileResponse(
+            open(video_path, "rb"),
+            content_type=get_media_content_type(video_path),
+        )
         response["Accept-Ranges"] = "bytes"
         response["Content-Length"] = file_size
 

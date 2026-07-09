@@ -49,6 +49,16 @@ async function playSegment(videoId, timestamp) {
                     <a href="https://www.youtube.com/watch?v=${youtubeId}&t=${startTime}s" target="_blank"
                        style="color:#002753;margin-left:12px;">Open on YouTube</a>
                 </div>`;
+        } else if (videoData.media_type === 'audio') {
+            const contentType = videoData.content_type || 'audio/mpeg';
+            playerHTML = `
+                <audio controls autoplay style="width:100%;max-width:800px;border-radius:8px;"
+                    onloadedmetadata="this.currentTime=${timestamp}">
+                    <source src="/video-file/${videoId}/" type="${contentType}">
+                </audio>
+                <div style="margin-top:15px;text-align:center;color:#434750;font-size:14px;">
+                    Starting at ${formatTime(timestamp)}
+                </div>`;
         } else {
             playerHTML = `
                 <video width="800" height="450" controls autoplay style="border-radius:8px;max-width:100%;"

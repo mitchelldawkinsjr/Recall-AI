@@ -22,7 +22,7 @@ class ProcessVideoJobTests(TestCase):
     def test_marks_job_completed_on_success(self, mock_processor):
         from . import views
 
-        mock_processor.create_comprehensive_video_summary.return_value = {
+        mock_processor.create_comprehensive_media_summary.return_value = {
             "metadata": {"duration": 10},
             "transcription": {"text": "hello"},
             "processing_errors": [],
@@ -38,7 +38,7 @@ class ProcessVideoJobTests(TestCase):
     def test_marks_job_failed_on_processor_errors(self, mock_processor):
         from . import views
 
-        mock_processor.create_comprehensive_video_summary.return_value = {
+        mock_processor.create_comprehensive_media_summary.return_value = {
             "metadata": {},
             "transcription": {},
             "processing_errors": ["ffmpeg failed"],
